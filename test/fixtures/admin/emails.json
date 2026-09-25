@@ -1,0 +1,4 @@
+[
+  { "isPrimary": true, "isVerified": true, "email": "me@example.test" },
+  { "isPrimary": false, "isVerified": false, "email": "alt@example.test" }
+]

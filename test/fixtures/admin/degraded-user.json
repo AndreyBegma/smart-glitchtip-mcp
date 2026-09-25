@@ -1,0 +1,12 @@
+{
+  "id": "1",
+  "username": "me@example.test",
+  "dateJoined": 20260101,
+  "email": null,
+  "hasPasswordAuth": "yes",
+  "identities": "not-a-list",
+  "lastLogin": null,
+  "isSuperuser": false,
+  "isActive": true,
+  "name": 42
+}
