@@ -35,6 +35,13 @@ workarounds.
    parallel CI load (Woodpecker #70). Assert linear scaling instead: time(2n) < 3 × time(n), plus a loose
    absolute ceiling (2 s).
 
+6. **Invisible format characters** — `neutralise` (src/format/sanitize.ts) and
+   `pathSegmentParam` also treat U+00AD (soft hyphen) and the rest of `\p{Cf}` as invisible
+   (found in the PR #44 review: `versionParam` accepted U+00AD).
+7. **No-retry option** — `client.raw()` and `page()` accept `{ noRetry: true }` (no 429/5xx retry, no
+   Retry-After sleep). The ingest verification poll uses it, so `wait_seconds` bounds the whole poll
+   (PR #43 review: a single poll could overrun by ~20 s).
+
 ## Acceptance criteria
 
 1. `isoTimestamp` unit tests incl. the injection string, RFC 2822, `2026-02-30T00:00:00Z`, extended years; issues `withRelative` renders `?` for a non-ISO value.
@@ -42,12 +49,14 @@ workarounds.
 3. A cursor containing `</untrusted>` or a newline is not printed raw.
 4. Alerts: a webhook URL straddling the 500-char cut leaves no prefix, with the local scrub disabled in the test.
 5. The perf test passes under `stress`-style parallel load (run it 5× concurrently locally) and still fails if the algorithm is made quadratic (verify by temporarily reverting to a per-step sort in a scratch copy — describe in the fix note).
+6. `neutralise`/`pathSegmentParam` refuse or neutralise U+00AD and a `\p{Cf}` sample.
+7. Ingest poll with a mocked 429 + `Retry-After: 10` finishes within `wait_seconds` + 1 s.
 
 ## Parallel plan
 
 | Slot | Owns | Touches | Depends on | Lead | Model |
 |---|---|---|---|---|---|
-| bug-followups | the five items | `src/format/**`, `src/toolsets/{issues,monitors,admin,alerts,performance,logs,stats}/**` (only the lines named above), their tests | BUG-017 and FEAT-011 merged | no | sonnet |
+| bug-followups | the seven items | `src/format/**`, `src/glitchtip/**` (noRetry), `src/mcp/tool-params.ts`, `src/toolsets/{issues,monitors,admin,alerts,performance,logs,stats,ingest}/**` (only the lines named above), their tests | BUG-017 and FEAT-011 merged | no | sonnet |
 
 ## Contention
 
