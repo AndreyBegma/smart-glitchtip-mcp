@@ -227,3 +227,46 @@ shared by the client.
 
 **Accepted cost.** Those fields are unreachable through this server; `api_request`
 (phase 2) is the escape hatch if an operator truly needs them.
+
+## D-21 — The escape hatch is two tools, and a denylist bounds it (amends D-06)
+
+**Decision.** The `api_request` toolset registers `api_get` (read-only, always
+listed when the toolset is enabled) and `api_request` (POST/PUT/PATCH/DELETE,
+destructive, exact `confirm` of `"<METHOD> /api/0/<path>"`), the latter only
+when not read-only **and** `GLITCHTIP_API_REQUEST_ALLOW_WRITE=true`. Paths are
+relative to the resolved instance's `/api/0/`; a fixed denylist
+(FEAT-20260925-015) refuses secret-minting and account-takeover routes for every
+method. `api_request` is the one exception to AGENTS.md rule 5 ("destructive
+operations are their own tool"): it is explicit by its own flag, confirm and
+annotations.
+
+**Why.** One tool cannot be both read-only and destructive (D-06's own
+argument); a GET-only escape hatch still reaches side-effecting GETs.
+
+**Accepted cost.** The denylist needs upkeep as GlitchTip adds routes.
+
+## D-22 — Uploads read local files only below an operator-set root
+
+**Decision.** The `uploads` toolset reads files only below
+`GLITCHTIP_UPLOAD_ROOT` (realpath containment, symlinks judged by their target,
+no dot-segments below the root, regular files only, at most
+`GLITCHTIP_UPLOAD_MAX_BYTES`). Naming `uploads` explicitly with
+`MCP_TRANSPORT=http`, or in stdio without a root, fails startup; under
+`GLITCHTIP_TOOLSETS=all` it is left out with a warning.
+
+**Why.** An agent steered by untrusted event text (D-18) must not be able to
+ship arbitrary local files to the instance.
+
+## D-23 — Admin coverage is narrower than "all" (amends D-06)
+
+**Decision.** D-06's `admin` toolset does not wrap, and `api_request` denies:
+API-token management (session-auth only; secrets in responses), MFA recovery
+codes, the setup wizard, invitation acceptance, deletion of the user, e-mail
+address changes, and SSO app create/update. E-mail addresses and SSO apps are
+readable; SSO apps deletable through an explicit tool.
+
+**Why.** Each is either unusable with a bearer token or a credential-minting /
+account-takeover path reachable by prompt injection. A person does these in the
+GlitchTip UI.
+
+**Accepted cost.** "Full API coverage" has these named holes.
