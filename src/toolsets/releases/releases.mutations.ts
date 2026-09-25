@@ -36,6 +36,18 @@ function noDuplicates(values: readonly string[]): boolean {
   return new Set(values).size === values.length;
 }
 
+/**
+ * Whether two ISO date-times name the same instant, treating `null`/`undefined` as "unreleased"
+ * (equal to each other, unequal to any parseable date). `2026-01-01T00:00:00Z` and
+ * `2026-01-01T00:00:00+00:00` compare equal (orchestrator review of #20 should-fix).
+ */
+function sameInstant(a: string | null | undefined, b: string | null | undefined): boolean {
+  const aEmpty = a === null || a === undefined;
+  const bEmpty = b === null || b === undefined;
+  if (aEmpty || bEmpty) return aEmpty && bEmpty;
+  return Date.parse(a) === Date.parse(b);
+}
+
 const createReleaseArgs = z.object({
   organization: organizationParam,
   version: versionParam,
@@ -144,8 +156,9 @@ export class ReleasesMutations {
     name: 'create_release',
     description:
       'Create a release linked to one or more projects. If the version already exists in the ' +
-      'organization, GlitchTip only links the extra projects; its ref and release date stay as ' +
-      `they were. Scope: project:releases. ${RELEASE_UNTRUSTED_NOTE}`,
+      'organization, GlitchTip only links the extra projects and keeps its ref and release date; ' +
+      'when `ref` or `date_released` was given, the output says whether it was actually applied. ' +
+      `Scope: project:releases. ${RELEASE_UNTRUSTED_NOTE}`,
     parameters: createReleaseArgs,
     annotations: {
       title: 'Create release',
@@ -178,7 +191,7 @@ export class ReleasesMutations {
     const summary = `Created release in ${org}, linked to ${linked.length} project(s): ${linked.join(', ')}.`;
     const changedRef = args.ref !== undefined && (created.ref ?? null) !== args.ref;
     const changedDate =
-      args.date_released !== undefined && created.dateReleased !== args.date_released;
+      args.date_released !== undefined && !sameInstant(created.dateReleased, args.date_released);
     const note =
       changedRef || changedDate
         ? 'The release already existed; its ref and release date were not changed — use update_release.'
@@ -210,6 +223,22 @@ export class ReleasesMutations {
       org,
       args.version,
     );
+    // GlitchTip's PUT is full-replace: an omitted field is re-stamped to now (dateReleased) or
+    // cleared (ref). If the GET response did not carry a value to preserve and the caller did not
+    // supply one either, sending anyway would silently apply one of those side effects instead of
+    // the no-op the caller asked for — refuse instead (blocker fix, orchestrator review of #20).
+    if (args.ref === undefined && typeof current.ref === 'undefined') {
+      return error(
+        "Not updated: GlitchTip's response did not include ref, so the current value cannot be " +
+          'preserved; pass `ref` explicitly.',
+      );
+    }
+    if (args.date_released === undefined && typeof current.dateReleased === 'undefined') {
+      return error(
+        "Not updated: GlitchTip's response did not include date_released, so the current value " +
+          'cannot be preserved; pass `date_released` explicitly.',
+      );
+    }
     const ref = args.ref !== undefined ? args.ref : (current.ref ?? null);
     const dateReleased =
       args.date_released !== undefined ? args.date_released : current.dateReleased;
@@ -339,7 +368,12 @@ export class ReleasesMutations {
       args.version,
     );
 
-    const merged: CommitIn[] = existing.map((c) => ({
+    // Deduped by id first (last wins, stable position): a stored list that already carries a
+    // duplicate id must not end up with a stale copy the id-lookup below can never reach
+    // (orchestrator review of #20 nit).
+    const deduped = new Map<string, (typeof existing)[number]>();
+    for (const c of existing) deduped.set(c.id, c);
+    const merged: CommitIn[] = [...deduped.values()].map((c) => ({
       id: c.id,
       message: c.message ?? '',
       authorName: c.authorName ?? '',

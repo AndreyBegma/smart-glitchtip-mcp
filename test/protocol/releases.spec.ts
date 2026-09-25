@@ -50,7 +50,7 @@ describe('tools/list with GLITCHTIP_TOOLSETS=releases (acceptance 2)', () => {
     }
   });
 
-  it('GLITCHTIP_READ_ONLY=false lists whoami plus all 15 tools', async () => {
+  it('GLITCHTIP_READ_ONLY=false lists whoami plus all 14 tools', async () => {
     const tools = await toolsWith({ GLITCHTIP_READ_ONLY: 'false' });
     expect(tools.map((t) => t.name).sort()).toEqual(
       ['whoami', ...READ_TOOLS, ...WRITE_TOOLS].sort(),

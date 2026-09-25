@@ -146,8 +146,10 @@ of how many are shown.
 | `format` | `"text"` \| `"json"` | `text` |
 
 Rendered as one block per commit (not a table — a fenced author/message can
-exceed a table cell's width): a 12-character id, fenced author name or email,
-and the fenced first line of the message, cut to 120 characters.
+exceed a table cell's width): a fenced 12-character id, fenced author as
+"Name <email>" (whichever of the two is present — an empty name never hides a
+present email), and the fenced first line of the message, cut to 120
+characters.
 
 ## `list_release_files`
 
@@ -179,6 +181,10 @@ headers. File contents are not available through this tool.
 | `file_id` | positive integer | required |
 | `format` | `"text"` \| `"json"` | `text` |
 
+Each header line renders as `<fenced key>: <fenced value>`: the key is a
+build-tool-set string same as its value, flattened and fenced so a key
+carrying a control character cannot forge extra lines in the output.
+
 ## `list_repositories`
 
 List the source repositories registered in an organization, newest first.
@@ -190,15 +196,18 @@ List the source repositories registered in an organization, newest first.
 | `cursor` | string | first page |
 | `format` | `"text"` \| `"json"` | `text` |
 
-Text output is a table (`id`, `status`, `provider` — its name, or `—` when it
-is not a string — `created`) with fenced name and url appended to each row.
-Empty: `No repositories in <org>.`
+Text output is a table (`id`, `created`) with the fenced name, url, status
+and provider name (`—` when it is not a string) appended to each row — status
+and provider are fenced rather than table columns, since GlitchTip does not
+constrain either to a fixed set server-side. Empty: `No repositories in
+<org>.`
 
 ## `create_release`
 
 Create a release linked to one or more projects. If the version already
-exists in the organization, GlitchTip only links the extra projects; its ref
-and release date stay as they were, and the output says so.
+exists in the organization, GlitchTip only links the extra projects and
+keeps its ref and release date; when `ref` or `date_released` was given, the
+output says whether it was actually applied.
 
 | Input | Type | Default |
 |---|---|---|
@@ -217,7 +226,10 @@ projects actually linked. All-unknown projects is GlitchTip's 422.
 Change a release's ref and/or release date. `ReleaseUpdate` is full-replace:
 the tool reads the release first and sends the complete pair back, so leaving
 one out never clears it — an omitted `dateReleased` in the request GlitchTip
-receives would otherwise be re-stamped to *now*.
+receives would otherwise be re-stamped to *now*. If the read response itself
+did not carry a value for a field the caller left out, the tool refuses
+rather than guess (which would otherwise silently clear `ref` or re-stamp
+`date_released`); pass that field explicitly to proceed.
 
 | Input | Type | Default |
 |---|---|---|

@@ -135,6 +135,36 @@ describe('create_release', () => {
     expect(isError).toBe(true);
     expect(mock.requests).toHaveLength(0);
   });
+
+  it('does not add the note when the response date is the same instant in a different format', async () => {
+    const mock = new MockGlitchTip().on(
+      'POST',
+      `${API}/organizations/acme/releases/`,
+      jsonResponse({ ...RELEASE, dateReleased: '2026-01-02T03:04:05+00:00' }, 201),
+    );
+    const { text } = await call(mock, 'create_release', {
+      organization: 'acme',
+      version: '1.0.0',
+      projects: ['web'],
+      date_released: '2026-01-02T03:04:05Z',
+    });
+    expect(text).not.toContain('already existed');
+  });
+
+  it('adds the note when the response date is a genuinely different instant', async () => {
+    const mock = new MockGlitchTip().on(
+      'POST',
+      `${API}/organizations/acme/releases/`,
+      jsonResponse({ ...RELEASE, dateReleased: '2025-01-01T00:00:00Z' }, 201),
+    );
+    const { text } = await call(mock, 'create_release', {
+      organization: 'acme',
+      version: '1.0.0',
+      projects: ['web'],
+      date_released: '2026-01-02T03:04:05Z',
+    });
+    expect(text).toContain('already existed');
+  });
 });
 
 describe('update_release', () => {
@@ -187,6 +217,58 @@ describe('update_release', () => {
     expect(isError).toBe(true);
     expect(text).toContain('Invalid parameters');
     expect(mock.requests).toHaveLength(0);
+  });
+
+  it('refuses without a PUT when the GET response omits ref and the caller did not supply one', async () => {
+    const { ref: _ref, ...partial } = RELEASE;
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/releases/1.0.0/`,
+      partial,
+    );
+    const { isError, text } = await call(mock, 'update_release', {
+      organization: 'acme',
+      version: '1.0.0',
+      date_released: '2026-03-01T00:00:00Z',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('did not include ref');
+    expect(mock.requests).toHaveLength(1);
+    expect(mock.requests[0].method).toBe('GET');
+  });
+
+  it('refuses without a PUT when the GET response omits dateReleased and the caller did not supply one', async () => {
+    const { dateReleased: _dateReleased, ...partial } = RELEASE;
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/releases/1.0.0/`,
+      partial,
+    );
+    const { isError, text } = await call(mock, 'update_release', {
+      organization: 'acme',
+      version: '1.0.0',
+      ref: 'new-ref',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('did not include date_released');
+    expect(mock.requests).toHaveLength(1);
+  });
+
+  it('proceeds when the caller supplies the field the GET response omits', async () => {
+    const { ref: _ref, ...partial } = RELEASE;
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/organizations/acme/releases/1.0.0/`, partial)
+      .json('PUT', `${API}/organizations/acme/releases/1.0.0/`, { ...RELEASE, ref: 'new-ref' });
+    const { isError } = await call(mock, 'update_release', {
+      organization: 'acme',
+      version: '1.0.0',
+      ref: 'new-ref',
+    });
+    expect(isError).toBe(false);
+    expect(JSON.parse(mock.requests[1].body)).toEqual({
+      ref: 'new-ref',
+      dateReleased: RELEASE.dateReleased,
+    });
   });
 });
 
@@ -366,6 +448,31 @@ describe('add_release_commits', () => {
     });
     expect(isError).toBe(true);
     expect(mock.requests).toHaveLength(0);
+  });
+
+  it('dedupes a stored list that already has a duplicate id, keeping the last occurrence', async () => {
+    const duplicated = [
+      { id: 'a1', message: 'stale', authorName: 'Old', authorEmail: 'old@example.test' },
+      { id: 'a2', message: 'kept', authorName: 'Dev', authorEmail: 'dev@example.test' },
+      { id: 'a1', message: 'fresh', authorName: 'New', authorEmail: 'new@example.test' },
+    ];
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/organizations/acme/releases/1.0.0/commits/`, duplicated)
+      .json('POST', `${API}/organizations/acme/releases/1.0.0/commits/`, {
+        ...RELEASE,
+        commitCount: 2,
+      });
+    await call(mock, 'add_release_commits', {
+      organization: 'acme',
+      version: '1.0.0',
+      commits: [{ id: 'a3', message: 'new one' }],
+    });
+    const body = JSON.parse(mock.requests[1].body);
+    expect(body).toEqual([
+      { id: 'a1', message: 'fresh', authorName: 'New', authorEmail: 'new@example.test' },
+      { id: 'a2', message: 'kept', authorName: 'Dev', authorEmail: 'dev@example.test' },
+      { id: 'a3', message: 'new one', authorName: '', authorEmail: '' },
+    ]);
   });
 
   it('refuses when the merged list would exceed 1000, after GET but before POST', async () => {

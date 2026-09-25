@@ -1,4 +1,5 @@
 import { GlitchTipError } from '../../glitchtip/glitchtip.errors';
+import { flatten } from './releases.format';
 
 /**
  * Rewrites a 404 on a release-scoped call into a message naming the version,
@@ -69,7 +70,7 @@ export async function callForRepositoryCreate<T>(
     if (err instanceof GlitchTipError && err.status === 409) {
       throw new GlitchTipError(
         'invalid',
-        `A repository named ${name} already exists in ${org}.`,
+        `A repository named ${flatten(name)} already exists in ${org}.`,
         err.status,
         err.detail,
       );

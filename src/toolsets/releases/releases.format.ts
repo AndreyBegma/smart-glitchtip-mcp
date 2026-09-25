@@ -39,6 +39,17 @@ function firstLine(text: string): string {
   return (text.split('\n')[0] ?? '').trim();
 }
 
+/** "Name <email>", whichever of the two is present; empty name must not hide a present email. */
+function commitAuthorText(
+  name: string | null | undefined,
+  email: string | null | undefined,
+): string {
+  const n = flatten(name ?? '');
+  const e = flatten(email ?? '');
+  if (n && e) return `${n} <${e}>`;
+  return n || e;
+}
+
 function releasedText(dateReleased: string | null | undefined): string {
   return dateReleased ?? 'unreleased';
 }
@@ -263,10 +274,11 @@ export function commitListView(
     text: () => {
       if (commits.length === 0) return `No commits on release ${version} in ${org}.`;
       const blocks = shown.map((c) => {
-        const id = (c.id ?? '').slice(0, 12) || '-';
+        const idText = c.id ? c.id.slice(0, 12) : '';
+        const id = idText ? untrusted('commit.id', idText, 'glitchtip-config') : '-';
         const author = untrusted(
           'commit.author',
-          truncate(c.authorName ?? c.authorEmail ?? '', FIELD_CAP),
+          truncate(commitAuthorText(c.authorName, c.authorEmail), FIELD_CAP),
           'glitchtip-config',
         );
         const message = untrusted(
@@ -350,16 +362,28 @@ export function releaseFileDetailView(version: string, file: ReleaseFile): View 
     untrusted: { field: 'files', source: 'glitchtip-config' },
     text: () => {
       const headers = Object.entries(file.headers ?? {})
-        .map(
-          ([key, value]) =>
-            `  ${key}: ${untrusted('headers', truncate(value ?? '', FIELD_CAP), 'glitchtip-config')}`,
-        )
+        .map(([key, value]) => {
+          // A header key is server/CI-set, same as its value: flattened and fenced so a key
+          // carrying "\n" cannot forge extra lines in the output (orchestrator review of #20).
+          const fencedKey = untrusted('headers.key', flatten(key ?? ''), 'glitchtip-config');
+          const fencedValue = untrusted(
+            'headers.value',
+            truncate(value ?? '', FIELD_CAP),
+            'glitchtip-config',
+          );
+          return `  ${fencedKey}: ${fencedValue}`;
+        })
         .join('\n');
       const body = keyValues([
         ['id', file.id],
         ['name', untrusted('name', truncate(file.name ?? '', FIELD_CAP), 'glitchtip-config')],
         ['size', humanSize(file.size ?? 0)],
-        ['sha1', file.sha1],
+        [
+          'sha1',
+          file.sha1
+            ? untrusted('sha1', truncate(file.sha1, FIELD_CAP), 'glitchtip-config')
+            : undefined,
+        ],
         ['created', file.dateCreated],
       ]);
       return headers ? `${body}\nheaders:\n${headers}` : body;
