@@ -1,0 +1,19 @@
+{
+  "id": "1",
+  "shortId": "PROJ-1",
+  "title": null,
+  "culprit": null,
+  "count": "1",
+  "userCount": null,
+  "numComments": 0,
+  "userReportCount": 0,
+  "type": "error",
+  "level": "error",
+  "status": "unresolved",
+  "metadata": {},
+  "firstSeen": "2026-01-01T00:00:00Z",
+  "lastSeen": "2026-01-02T00:00:00Z",
+  "assignedTo": null,
+  "stats": null,
+  "permalink": "Not implemented"
+}
