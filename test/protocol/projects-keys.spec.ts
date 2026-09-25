@@ -184,6 +184,107 @@ describe('update_project_key', () => {
     expect(JSON.parse(mock.requests[1].body)).toEqual({ name: 'Default', rateLimit: null });
   });
 
+  // BUG-20260925-017: the key's canonical field is `label`; `name` may be absent.
+  it('keeps the label on a rate-limit-only update when the GET carries only label', async () => {
+    const { name: _omitted, ...labelOnly } = KEY;
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, labelOnly)
+      .json('PUT', `${API}/projects/acme/web/keys/${KEY_ID}/`, KEY);
+    await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      rate_limit: { window: 60, count: 5 },
+    });
+    expect(JSON.parse(mock.requests[1].body)).toEqual({
+      name: 'Default',
+      rateLimit: { window: 60, count: 5 },
+    });
+  });
+
+  it('refuses, without a PUT, when the GET has neither name nor label and no label is given', async () => {
+    const { name: _n, label: _l, ...nameless } = KEY;
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/projects/acme/web/keys/${KEY_ID}/`,
+      nameless,
+    );
+    const { text, isError } = await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      rate_limit: null,
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain("GlitchTip's response did not include label");
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
+  it('refuses, without a PUT, when the GET has a label and a name of the wrong type', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, {
+      ...KEY,
+      name: 7,
+      label: ['Default'],
+    });
+    const { text, isError } = await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      rate_limit: null,
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain("GlitchTip's response returned label as something other than");
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
+  it('uses label when name has the wrong type', async () => {
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, { ...KEY, name: 7 })
+      .json('PUT', `${API}/projects/acme/web/keys/${KEY_ID}/`, KEY);
+    await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      rate_limit: null,
+    });
+    expect(JSON.parse(mock.requests[1].body)).toEqual({ name: 'Default', rateLimit: null });
+  });
+
+  it('refuses, without a PUT, when the GET has a malformed rateLimit and none is given', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, {
+      ...KEY,
+      rateLimit: { window: '60' },
+    });
+    const { text, isError } = await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      label: 'Renamed',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain("GlitchTip's response returned rateLimit as something other than");
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
+  it('refuses, without a PUT, when the GET has no rateLimit and none is given', async () => {
+    const { rateLimit: _omitted, ...partial } = KEY;
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/projects/acme/web/keys/${KEY_ID}/`,
+      partial,
+    );
+    const { text, isError } = await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      label: 'Renamed',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain("GlitchTip's response did not include rateLimit");
+    expect(text).toContain('pass `rate_limit` explicitly');
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
   it('maps 403 to the write scopes', async () => {
     const mock = new MockGlitchTip()
       .json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, KEY)

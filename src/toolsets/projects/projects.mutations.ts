@@ -57,6 +57,46 @@ const updateProjectArgs = z
     { message: 'At least one of name, platform, new_slug or event_throttle_rate is required.' },
   );
 
+/**
+ * What update_project must re-send, and the parameter that supplies each. A field
+ * the read left out refuses the call (AGENTS.md rule 15); a `null` is re-sent.
+ */
+const UPDATE_PROJECT_FIELDS = [
+  { field: 'name', param: 'name', kind: 'text', usable: isText },
+  { field: 'slug', param: 'new_slug', kind: 'text or null', usable: isTextOrNull },
+  { field: 'platform', param: 'platform', kind: 'text or null', usable: isTextOrNull },
+  {
+    field: 'eventThrottleRate',
+    param: 'event_throttle_rate',
+    kind: 'a number or null',
+    usable: (value: unknown) => value === null || Number.isFinite(value),
+  },
+] as const;
+
+function isText(value: unknown): boolean {
+  return typeof value === 'string';
+}
+
+function isTextOrNull(value: unknown): boolean {
+  return value === null || typeof value === 'string';
+}
+
+/**
+ * The refusal of a read-then-write whose read lacks a field it must re-send,
+ * or carries it with the wrong type (AGENTS.md rule 15). `value` is never
+ * quoted: it is GlitchTip data.
+ */
+export function notPreserved(field: string, param: string, value: unknown, kind: string): string {
+  const what =
+    value === undefined
+      ? `did not include ${field}`
+      : `returned ${field} as something other than ${kind}`;
+  return (
+    `Not updated: GlitchTip's response ${what}, so its current value cannot be preserved; ` +
+    `pass \`${param}\` explicitly or retry.`
+  );
+}
+
 const deleteProjectArgs = z.object({
   organization: organizationParam,
   project: projectParam,
@@ -138,7 +178,8 @@ export class ProjectsMutations {
     name: 'update_project',
     description:
       "Change a project's name, platform, slug or event throttle rate. Unspecified fields " +
-      'keep their current value. Scope: project:write or project:admin.',
+      "keep their current value; if GlitchTip's read of one is incomplete, the call is " +
+      'refused rather than clearing it. Scope: project:write or project:admin.',
     parameters: updateProjectArgs,
     annotations: {
       title: 'Update project',
@@ -164,6 +205,17 @@ export class ProjectsMutations {
           params: { path: { organization_slug: org, project_slug: args.project } },
         }),
     );
+    // ProjectIn is full-replace: each field is the caller's value, else the one read back.
+    const body = {
+      name: args.name ?? current.name,
+      slug: args.new_slug ?? current.slug,
+      platform: args.platform ?? current.platform,
+      eventThrottleRate: args.event_throttle_rate ?? current.eventThrottleRate,
+    };
+    const gap = UPDATE_PROJECT_FIELDS.find(({ field, usable }) => !usable(body[field]));
+    if (gap) {
+      return error(notPreserved(gap.field, gap.param, body[gap.field], gap.kind));
+    }
     const updated = await glitchtip.client.call(
       {
         name: 'update project',
@@ -175,12 +227,7 @@ export class ProjectsMutations {
       (api) =>
         api.PUT('/api/0/projects/{organization_slug}/{project_slug}/', {
           params: { path: { organization_slug: org, project_slug: args.project } },
-          body: {
-            name: args.name ?? current.name,
-            slug: args.new_slug ?? current.slug,
-            platform: args.platform ?? current.platform,
-            eventThrottleRate: args.event_throttle_rate ?? current.eventThrottleRate,
-          },
+          body,
         }),
     );
     return this.output.render(

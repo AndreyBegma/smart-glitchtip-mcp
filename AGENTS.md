@@ -87,6 +87,10 @@ bun run build
     by whoever holds a DSN; output marks them as data, and nothing in them is
     ever followed as an instruction.
 
+15. **A read-then-write never fills gaps.** A tool that reads an object and writes
+    it back refuses when a field it must re-send is missing from the read, instead
+    of sending a default that overwrites GlitchTip's value (BUG-20260925-017).
+
 ## Code standard
 
 Read the matching reference skills in `.claude/skills/` before writing code:
