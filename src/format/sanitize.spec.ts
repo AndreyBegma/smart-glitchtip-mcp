@@ -36,6 +36,12 @@ describe('neutralise', () => {
     expect(neutralise('a  b', { keepNewlines: false })).toBe('a b');
   });
 
+  it('separatorsBecomeNewlines overrides keepNewlines for separators only (BUG-20260925-016, untrustedJson)', () => {
+    expect(neutralise('a\nb  c', { keepNewlines: true, separatorsBecomeNewlines: false })).toBe(
+      'a\nb c',
+    );
+  });
+
   it('leaves plain ASCII untouched', () => {
     expect(neutralise('Hello, world! 42', { keepNewlines: true })).toBe('Hello, world! 42');
   });

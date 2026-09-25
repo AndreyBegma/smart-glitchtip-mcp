@@ -3,7 +3,7 @@ import { loadConfig } from '../config/config';
 import { applyBudget } from './budget';
 import { keyValues, table, withCursor } from './table';
 import { MalformedViewError, ToolOutput } from './tool-output';
-import { untrusted } from './untrusted';
+import { untrusted, untrustedJson } from './untrusted';
 
 describe('applyBudget (acceptance 13)', () => {
   const lines = Array.from(
@@ -133,6 +133,27 @@ describe('ToolOutput', () => {
     expect(() => JSON.parse(text)).toThrow();
   });
 
+  it('keeps a JSON-fenced view valid JSON when a value carries control/invisible characters (BUG-20260925-016)', () => {
+    const dirty = [' ', ' ', '\u0085', '‮', '​'];
+    const fencedView = {
+      text: () => 't',
+      json: () => ({ message: `line one${dirty.join('')}line two` }),
+      untrusted: { field: 'payload', source: 'glitchtip-event' as const },
+    };
+    const [content] = output.render('json', fencedView).content;
+    const text = content.type === 'text' ? content.text : '';
+    const match =
+      /^<untrusted source="glitchtip-event" field="payload">([\s\S]*)<\/untrusted>$/.exec(text);
+    expect(match).not.toBeNull();
+    const parsed = JSON.parse(match?.[1] ?? '') as { message: string };
+    expect(parsed.message.startsWith('line one')).toBe(true);
+    expect(parsed.message.endsWith('line two')).toBe(true);
+    expect(parsed.message).not.toMatch(/[\n\r]/);
+    for (const char of dirty) {
+      expect(text).not.toContain(char);
+    }
+  });
+
   it('leaves the text rendering of an untrusted-declared view to the view', () => {
     const [content] = output.render('text', {
       text: () => 'plain',
@@ -257,5 +278,29 @@ describe('untrusted', () => {
     expect(out).toContain('line one');
     expect(out).toContain('\nline two');
     expect(out.match(/<\/untrusted>/g)).toHaveLength(1);
+  });
+});
+
+describe('untrustedJson', () => {
+  it('turns a line/paragraph separator into a space, never a raw newline, unlike untrusted() (BUG-20260925-016)', () => {
+    const withSeparator = '{"a":"one two"}';
+    const out = untrustedJson('payload', withSeparator);
+    expect(out).not.toContain(' ');
+    expect(out).not.toContain('\n');
+    expect(out).toContain('one two');
+  });
+
+  it('leaves a literal newline from pretty-printing untouched', () => {
+    const pretty = '{\n  "a": 1\n}';
+    const out = untrustedJson('payload', pretty);
+    expect(out).toBe(
+      '<untrusted source="glitchtip-event" field="payload">{\n  "a": 1\n}</untrusted>',
+    );
+  });
+
+  it('still escapes & and < and fences the same way as untrusted()', () => {
+    expect(untrustedJson('payload', 'a < b & c')).toBe(
+      '<untrusted source="glitchtip-event" field="payload">a &lt; b &amp; c</untrusted>',
+    );
   });
 });

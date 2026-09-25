@@ -40,9 +40,32 @@ export function untrusted(
   text: string,
   source: UntrustedSource = 'glitchtip-event',
 ): string {
+  return fence(field, neutralise(text, { keepNewlines: true }), source);
+}
+
+/**
+ * Fences a JSON payload (D-18), for `ToolOutput`'s json path. Like
+ * `untrusted()`, but a run of line/paragraph separators always becomes a
+ * space, never a raw newline: `JSON.stringify` may leave U+2028/U+2029
+ * unescaped inside a string value, and turning one into `\n` there would
+ * leave an unescaped control character inside a JSON string, which RFC 8259
+ * does not allow. The JSON's own pretty-printed newlines are untouched
+ * either way.
+ */
+export function untrustedJson(
+  field: string,
+  json: string,
+  source: UntrustedSource = 'glitchtip-event',
+): string {
+  return fence(
+    field,
+    neutralise(json, { keepNewlines: true, separatorsBecomeNewlines: false }),
+    source,
+  );
+}
+
+function fence(field: string, body: string, source: UntrustedSource): string {
   const safeField = field.replace(/[^A-Za-z0-9_.-]/g, '');
-  const body = neutralise(text, { keepNewlines: true })
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;');
-  return `<untrusted source="${source}" field="${safeField}">${body}${UNTRUSTED_CLOSE_TAG}`;
+  const escaped = body.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  return `<untrusted source="${source}" field="${safeField}">${escaped}${UNTRUSTED_CLOSE_TAG}`;
 }

@@ -49,9 +49,28 @@ const SPACE_RUN_ALL = new RegExp(
 );
 const LINE_PARAGRAPH_SEPARATORS = new RegExp(`[${LINE_PARAGRAPH_CLASS}]+`, 'g');
 
-export function neutralise(text: string, { keepNewlines }: { keepNewlines: boolean }): string {
+export interface NeutraliseOptions {
+  readonly keepNewlines: boolean;
+  /**
+   * Whether a run of line/paragraph separators becomes `\n` (true) or a
+   * space (false). Defaults to `keepNewlines`. `untrustedJson` sets this to
+   * `false` independent of `keepNewlines`: `JSON.stringify` may leave
+   * U+2028/U+2029 unescaped inside a string value (RFC 8259 permits it), and
+   * turning one into a raw newline there would make that JSON string
+   * invalid — where a plain literal `\n` already in the text (from
+   * pretty-printing) is left alone either way.
+   */
+  readonly separatorsBecomeNewlines?: boolean;
+}
+
+export function neutralise(
+  text: string,
+  { keepNewlines, separatorsBecomeNewlines = keepNewlines }: NeutraliseOptions,
+): string {
   const spaceRun = keepNewlines ? SPACE_RUN_KEEP_NEWLINES : SPACE_RUN_ALL;
-  return text.replace(spaceRun, ' ').replace(LINE_PARAGRAPH_SEPARATORS, keepNewlines ? '\n' : ' ');
+  return text
+    .replace(spaceRun, ' ')
+    .replace(LINE_PARAGRAPH_SEPARATORS, separatorsBecomeNewlines ? '\n' : ' ');
 }
 
 /** The shared flatten (D-12): neutralised, then whitespace collapsed to one line. */
