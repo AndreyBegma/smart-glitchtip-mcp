@@ -32,6 +32,7 @@ export function issueListView(
 ): View {
   const issues = page.items;
   return {
+    untrusted: { field: 'payload', source: 'glitchtip-event' },
     text: () => {
       if (issues.length === 0) {
         const where = project ? `${org}/${project}` : org;
@@ -47,8 +48,10 @@ export function issueListView(
         { header: 'count', value: (i) => i.count },
         { header: 'users', value: (i) => i.userCount ?? 0 },
         { header: 'lastSeen', value: (i) => withRelative(i.lastSeen) },
-        { header: 'project', value: (i) => i.project?.slug ?? i.project?.name ?? '-' },
-        { header: 'assignee', value: (i) => actorLabel(i.assignedTo) },
+        // Table cells are cut at 80 characters, which would split a fence:
+        // only slugs and ids here; names are fenced in get_issue (D-18).
+        { header: 'project', value: (i) => i.project?.slug ?? '-' },
+        { header: 'assignee', value: (i) => actorId(i.assignedTo) },
       ]);
       const [header, ...rows] = body.split('\n');
       const withTitles = rows.map(
@@ -77,6 +80,7 @@ export function issueListView(
 
 export function issueDetailView(issue: IssueDetail): View {
   return {
+    untrusted: { field: 'payload', source: 'glitchtip-event' },
     text: () => {
       const body = keyValues([
         ['shortId', issue.shortId],
@@ -87,7 +91,7 @@ export function issueDetailView(issue: IssueDetail): View {
         ['users', issue.userCount ?? 0],
         ['lastSeen', withRelative(issue.lastSeen)],
         ['firstSeen', withRelative(issue.firstSeen)],
-        ['project', issue.project?.slug ?? issue.project?.name ?? '-'],
+        ['project', projectLabel(issue.project)],
         ['assignee', actorLabel(issue.assignedTo)],
         ['type', issue.type],
         ['firstRelease', releaseVersionText('firstRelease', issue.firstRelease)],
@@ -267,9 +271,26 @@ function withRelative(iso: string | null | undefined, now?: number): string {
   return `${relativeTime(iso, now)} (${iso})`;
 }
 
+/** `team:<slug>`, or the kind and the fenced name: a name is whatever its owner typed. */
 function actorLabel(actor: IssueActor | null | undefined): string {
   if (!actor) return '-';
-  return actor.type === 'team' ? `team:${actor.slug ?? actor.name}` : `user:${actor.name}`;
+  if (actor.type === 'team' && actor.slug) return `team:${actor.slug}`;
+  return `${actor.type}:${untrusted('assignee', capText(flatten(actor.name ?? '')), 'glitchtip-user')}`;
+}
+
+/** A table-safe actor: `team:<slug>` or `<type>:<id>`, never a free-text name. */
+function actorId(actor: IssueActor | null | undefined): string {
+  if (!actor) return '-';
+  return actor.type === 'team' && actor.slug ? `team:${actor.slug}` : `${actor.type}:${actor.id}`;
+}
+
+function projectLabel(
+  project: { slug?: string | null; name?: string | null } | null | undefined,
+): string {
+  if (project?.slug) return project.slug;
+  return project?.name
+    ? untrusted('project', capText(flatten(project.name)), 'glitchtip-config')
+    : '-';
 }
 
 function actorProjection(actor: IssueActor | null | undefined): unknown {

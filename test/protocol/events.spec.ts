@@ -157,7 +157,7 @@ describe('get_latest_event', () => {
     expect(text).toBe('Issue 42 was not found in acme.');
   });
 
-  it('format: "json" returns the projected object directly, unfenced (review 6, final ruling)', async () => {
+  it('format: "json" returns the projected object in one payload fence (BUG-20260925-006 §5)', async () => {
     const mock = new MockGlitchTip().json(
       'GET',
       `${API}/organizations/${ORG}/issues/42/events/latest/`,
@@ -168,8 +168,8 @@ describe('get_latest_event', () => {
       format: 'json',
     });
     expect(isError).toBe(false);
-    expect(text).not.toContain('<untrusted');
-    const parsed = JSON.parse(text) as { header: { id: string } };
+    expect(text.match(/<untrusted /g)).toHaveLength(1);
+    const parsed = unfence(text) as { header: { id: string } };
     expect(parsed.header.id).toBe('evt-1');
   });
 });
@@ -242,7 +242,7 @@ describe('get_event_json', () => {
     expect(text).toContain('a@b.test');
   });
 
-  it('format: "json" returns the redacted object directly, unfenced (review 6, final ruling)', async () => {
+  it('format: "json" returns the redacted object in one payload fence, parseable between the tags (acceptance 8)', async () => {
     const mock = new MockGlitchTip().json(
       'GET',
       `${API}/organizations/${ORG}/issues/42/events/evt-1/json/`,
@@ -254,8 +254,10 @@ describe('get_event_json', () => {
       format: 'json',
     });
     expect(isError).toBe(false);
-    expect(text).not.toContain('<untrusted');
-    const parsed = JSON.parse(text) as {
+    expect(text).toMatch(/^<untrusted source="glitchtip-event" field="payload">\{/);
+    // The payload is fenced JSON, not a JSON string literal of it.
+    expect(() => JSON.parse(text)).toThrow();
+    const parsed = unfence(text) as {
       user: Record<string, unknown>;
       request: { cookies: unknown };
     };

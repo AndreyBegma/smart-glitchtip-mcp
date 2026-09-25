@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { type Booted, type BootedHttp, bootHttp, bootInMemory, GLITCHTIP } from './boot';
+import { TOOLSET_NAMES } from '../../src/toolsets/toolset';
+import {
+  type Booted,
+  type BootedHttp,
+  bootHttp,
+  bootInMemory,
+  GLITCHTIP,
+  withPending,
+} from './boot';
 import { MockGlitchTip } from './mock-glitchtip';
 
 // The harness itself: every "absent from logs" assertion in the suite is only
@@ -39,14 +47,21 @@ describe('log capture per boot', () => {
     expect(first.logs()).not.toContain('second-boot-agent');
   });
 
+  // Each boot marks its own toolset pending in an injected registry, so the
+  // distinguishing warning exists whichever toolsets have shipped.
   it('each in-memory boot receives its own lines', async () => {
-    const first = await bootInMemory({ GLITCHTIP_TOOLSETS: 'alerts' }, mock());
+    const [one, two] = [TOOLSET_NAMES[0], TOOLSET_NAMES[1]];
+    const first = await bootInMemory({ GLITCHTIP_TOOLSETS: one }, mock(), {
+      toolsets: withPending(one),
+    });
     open.push(first);
-    const second = await bootInMemory({ GLITCHTIP_TOOLSETS: 'monitors' }, mock());
+    const second = await bootInMemory({ GLITCHTIP_TOOLSETS: two }, mock(), {
+      toolsets: withPending(two),
+    });
     open.push(second);
-    expect(first.logs()).toContain('"toolset":"alerts"');
-    expect(second.logs()).toContain('"toolset":"monitors"');
+    expect(first.logs()).toContain(`"toolset":"${one}"`);
+    expect(second.logs()).toContain(`"toolset":"${two}"`);
     expect(second.logs()).toContain('Nest microservice successfully started');
-    expect(first.logs()).not.toContain('"toolset":"monitors"');
+    expect(first.logs()).not.toContain(`"toolset":"${two}"`);
   });
 });

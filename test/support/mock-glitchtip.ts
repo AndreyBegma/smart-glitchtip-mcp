@@ -4,7 +4,10 @@ export interface RecordedRequest {
   readonly method: string;
   readonly url: URL;
   readonly headers: Headers;
+  /** The body decoded as UTF-8 ('' when there is none). */
   readonly body: string;
+  /** The body as sent, for gzip chunks and multipart parts. */
+  readonly bodyBytes: Uint8Array;
   readonly redirect: Request['redirect'];
 }
 
@@ -47,11 +50,13 @@ export class MockGlitchTip {
   readonly followingRedirects: RecordedRequest[] = [];
 
   readonly fetch: FetchLike = async (request) => {
+    const bodyBytes = request.body ? new Uint8Array(await request.arrayBuffer()) : new Uint8Array();
     const recorded: RecordedRequest = {
       method: request.method,
       url: new URL(request.url),
       headers: new Headers(request.headers),
-      body: request.body ? await request.text() : '',
+      body: new TextDecoder().decode(bodyBytes),
+      bodyBytes,
       redirect: request.redirect,
     };
     this.requests.push(recorded);

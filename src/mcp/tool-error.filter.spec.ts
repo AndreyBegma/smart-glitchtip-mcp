@@ -3,6 +3,7 @@ import { RpcException } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../config/config';
+import { MalformedViewError } from '../format/tool-output';
 import { recordAuthGrant } from '../glitchtip/auth-grant';
 import { GlitchTipError } from '../glitchtip/glitchtip.errors';
 import { InstanceError } from '../glitchtip/instance.resolver';
@@ -21,12 +22,20 @@ const filter = new ToolErrorFilter(
   }),
 );
 
-/** An RPC host whose McpContext exposes a request the guard granted pass-through. */
-function hostWithPassThrough(): ArgumentsHost {
+/**
+ * An RPC host whose McpContext exposes a request the guard granted
+ * pass-through and, like mcp-nest's, the `tools/call` request as `mcpRequest`.
+ */
+function hostWithPassThrough(tool?: string): ArgumentsHost {
   const raw = { headers: {} };
   recordAuthGrant(raw, { mode: 'passthrough', token: CLIENT_TOKEN });
-  const context = { getRawRequest: () => raw };
-  return { switchToRpc: () => ({ getContext: () => context }) } as unknown as ArgumentsHost;
+  const context = {
+    getRawRequest: () => raw,
+    mcpRequest: { method: 'tools/call', params: { name: tool, arguments: {} } },
+  };
+  return {
+    switchToRpc: () => ({ getContext: () => context, getData: () => ({}) }),
+  } as unknown as ArgumentsHost;
 }
 
 async function rejection(exception: unknown, host = {} as ArgumentsHost): Promise<unknown> {
@@ -72,6 +81,63 @@ describe('ToolErrorFilter', () => {
     expect(result.message).toMatch(/^Internal error in smart-glitchtip-mcp \([0-9a-f-]{36}\)\.$/);
     expect(logged.join('\n')).toContain('invalid header value');
     expect(logged.join('\n')).not.toContain('tok_ANY_999');
+  });
+
+  it('maps a TypeError to the malformed message naming the tool from the MCP context', async () => {
+    const logged = captureErrors();
+    const host = hostWithPassThrough('get_organization');
+    const result = (await rejection(
+      new TypeError("Cannot read properties of null (reading 'length')"),
+      host,
+    )) as {
+      message: string;
+    };
+    expect(result.message).toMatch(
+      /^GlitchTip returned a response this server did not expect for get_organization \(([0-9a-f-]{36})\)\. The request itself succeeded; try format "json", or `api_get`/,
+    );
+    const id = /\(([0-9a-f-]{36})\)/.exec(result.message)?.[1];
+    expect(logged.join('\n')).toContain(`"errorId":"${id}"`);
+    expect(logged.join('\n')).toContain("reading 'length'");
+  });
+
+  it('maps a RangeError and a MalformedViewError the same way, falling back to the view operation', async () => {
+    captureErrors();
+    const range = (await rejection(new RangeError('Invalid time value'))) as { message: string };
+    expect(range.message).toMatch(/did not expect for this call \(/);
+    const view = new MalformedViewError('list_issues', { cause: new TypeError('x') });
+    const fromView = (await rejection(view)) as { message: string };
+    expect(fromView.message).toMatch(/did not expect for list_issues \(/);
+  });
+
+  it('keeps every secret out of a malformed error log line (acceptance 12)', async () => {
+    const logged = captureErrors();
+    const cause = new TypeError(`bad ${ENV_TOKEN} ${MCP_SECRET} ${CLIENT_TOKEN}`);
+    const result = (await rejection(
+      new MalformedViewError('get_event', { cause }),
+      hostWithPassThrough('get_event'),
+    )) as { message: string };
+    const text = `${logged.join('\n')}\n${result.message}`;
+    expect(logged.join('\n')).toContain('bad [redacted] [redacted] [redacted]');
+    for (const secret of [ENV_TOKEN, MCP_SECRET, CLIENT_TOKEN]) expect(text).not.toContain(secret);
+  });
+
+  it('logs a cyclic cause chain without overflowing, and caps a deep one at five causes', async () => {
+    const logged = captureErrors();
+    const a = new TypeError('first');
+    const b = new Error('second', { cause: a });
+    Object.defineProperty(a, 'cause', { value: b });
+    const cyclic = (await rejection(a)) as { message: string };
+    expect(cyclic.message).toMatch(/did not expect for this call/);
+    expect(logged.join('\n')).toContain('(cyclic cause)');
+
+    let deep: Error = new Error('root cause 0');
+    for (let i = 1; i <= 20; i++) deep = new Error(`cause ${i}`, { cause: deep });
+    logged.length = 0;
+    await rejection(deep);
+    const text = logged.join('\n');
+    expect(text.match(/Caused by: /g)).toHaveLength(6);
+    expect(text).toContain('(further causes omitted)');
+    expect(text).not.toContain('root cause 0');
   });
 
   it('strips the env token, MCP_AUTH_TOKEN and the pass-through token from the log', async () => {

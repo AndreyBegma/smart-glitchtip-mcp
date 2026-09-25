@@ -35,6 +35,26 @@ export const cursorParam = z
   .optional()
   .describe('Cursor from the previous page ("next cursor: …"); omit for the first page.');
 
+/**
+ * Free-form input a tool puts into a URL path (a release version, a name):
+ * exactly one path segment. Refuses `.`, `..` and all-dot values, which URL
+ * normalisation would collapse into another route, and `/`, `\`, `%` and
+ * control characters. Slug inputs keep the slug regex, which already
+ * excludes all of these. Every toolset refuses such values the same way.
+ */
+export function pathSegmentParam(label: string, maxLength: number) {
+  return z
+    .string()
+    .min(1, `${label} must not be empty`)
+    .max(maxLength, `${label} must be at most ${maxLength} characters`)
+    .refine((value) => !/^\.+$/.test(value), `${label} must not be "." or ".." or only dots`)
+    .refine(
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
+      (value) => !/[/\\%\u0000-\u001f\u007f]/.test(value),
+      `${label} must not contain /, \\, % or control characters`,
+    );
+}
+
 /** MCP annotations (D-06, AGENTS.md rule 3). Every tool reaches an external system. */
 export const READ_ONLY: ToolAnnotations = {
   readOnlyHint: true,

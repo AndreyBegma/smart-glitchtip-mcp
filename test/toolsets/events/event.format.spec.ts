@@ -28,7 +28,7 @@ const HUGE_BUDGET = 1_000_000;
 
 describe('eventListView — null title/tags (review 9)', () => {
   it('falls back instead of throwing when title/tags arrive as null', () => {
-    const page = { items: [malformedListItem], nextCursor: undefined };
+    const page = { items: [malformedListItem], nextCursor: undefined, headers: new Headers() };
     expect(() => eventListView(page, { includeGroupId: false }, HUGE_BUDGET)).not.toThrow();
     const view = eventListView(page, { includeGroupId: false }, HUGE_BUDGET);
     const text = view.text();
@@ -53,6 +53,7 @@ describe('eventListView — null title/tags (review 9)', () => {
         },
       ],
       nextCursor: undefined,
+      headers: new Headers(),
     };
     const text = eventListView(page, { includeGroupId: false }, HUGE_BUDGET).text();
     expect(text.match(/<untrusted /g)).toHaveLength(1);
@@ -87,7 +88,7 @@ describe('format: "json" is unfenced, parseable JSON (review 6, final ruling)', 
   });
 
   it('eventListView.json() is a plain object with an events array, top level unfenced', () => {
-    const page = { items: [], nextCursor: undefined };
+    const page = { items: [], nextCursor: undefined, headers: new Headers() };
     const view = eventListView(page, { includeGroupId: false }, HUGE_BUDGET);
     const json = view.json() as { events: unknown[] };
     expect(Array.isArray(json.events)).toBe(true);
@@ -141,6 +142,16 @@ describe('JSON results degrade to a truncated notice, never a mid-cut (review 12
     const raw = { entries: Array.from({ length: 500 }, (_, i) => ({ i, pad: 'x'.repeat(200) })) };
     const view = eventJsonView(raw, undefined, 500);
     expect(view.json()).toEqual({ truncated: true, hint: 'use path to select part of the event' });
+  });
+
+  it('eventJsonView.json() measures the fenced, escaped form: just under the budget unfenced still degrades', () => {
+    const raw = { note: '<'.repeat(300) };
+    const unfencedLength = JSON.stringify(raw, null, 2).length;
+    // Fits unfenced by a margin, but not once fenced and escaped (`<` → `&lt;`).
+    const view = eventJsonView(raw, undefined, unfencedLength + 10);
+    expect(view.json()).toEqual({ truncated: true, hint: 'use path to select part of the event' });
+    const roomy = eventJsonView(raw, undefined, 10_000);
+    expect(roomy.json()).toEqual(raw);
   });
 
   it('eventJsonView.text() degrades to a fenced notice at a tiny budget', () => {

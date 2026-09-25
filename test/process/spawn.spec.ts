@@ -117,7 +117,7 @@ describe('stdio (acceptance 10)', () => {
     const { stdout, stderr } = await run(
       {
         GLITCHTIP_URL: 'http://127.0.0.1:9',
-        GLITCHTIP_TOOLSETS: 'organizations,alerts',
+        GLITCHTIP_TOOLSETS: 'organizations',
         GLITCHTIP_TIMEOUT_MS: '500',
         LOG_LEVEL: 'trace',
       },
@@ -130,8 +130,9 @@ describe('stdio (acceptance 10)', () => {
     const messages = lines.map((line) => JSON.parse(line) as { jsonrpc: string; id?: number });
     for (const message of messages) expect(message.jsonrpc).toBe('2.0');
     expect(messages.map((m) => m.id)).toEqual(expect.arrayContaining([1, 2, 3]));
-    // The logs exist, and they went to stderr.
-    expect(stderr).toContain('not yet available');
+    // The logs exist, and they went to stderr. (The "not yet available"
+    // warning is covered in process: a spawned server cannot be handed a
+    // registry with a pending toolset.)
     expect(stderr).toContain('GLITCHTIP_TOKEN is not set');
   });
 });

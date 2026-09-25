@@ -48,7 +48,11 @@ describe('GlitchTipClient', () => {
     const { mock, client } = setup();
     mock.json('GET', ORGS, [{ slug: 'acme' }]);
     const page = await listOrgs(client);
-    expect(page).toEqual({ items: [{ slug: 'acme' }], nextCursor: undefined });
+    expect(page).toEqual({
+      items: [{ slug: 'acme' }],
+      nextCursor: undefined,
+      headers: expect.any(Headers),
+    });
     const [request] = mock.requests;
     expect(request.headers.get('authorization')).toBe(`Bearer ${TOKEN}`);
     expect(request.headers.get('accept')).toBe('application/json');
@@ -263,10 +267,12 @@ describe('GlitchTipClient', () => {
     expect(error.detail).toHaveLength(501);
   });
 
-  it('reports a non-JSON success body as upstream', async () => {
+  it('reports a non-JSON success body as malformed (BUG-20260925-006, formerly upstream)', async () => {
     const { mock, client } = setup();
     mock.on('GET', ORGS, new Response('<html>login</html>', { status: 200 }));
-    expect((await failure(listOrgs(client))).kind).toBe('upstream');
+    const error = await failure(listOrgs(client));
+    expect(error.kind).toBe('malformed');
+    expect(error.message).toMatch(/not valid JSON; is the instance URL pointing at GlitchTip\?$/);
   });
 
   it('removes the token if GlitchTip echoes it back', async () => {

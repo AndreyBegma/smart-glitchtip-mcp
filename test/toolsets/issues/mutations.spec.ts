@@ -141,7 +141,9 @@ describe('assign_issue', () => {
       assignee: 'user:1',
     });
     expect(JSON.parse(mock.requests[0].body)).toEqual({ assignedTo: 'user:1' });
-    expect(text).toBe('Issue 123: assignee is now user:Dev.');
+    expect(text).toBe(
+      'Issue 123: assignee is now user:<untrusted source="glitchtip-user" field="assignee">Dev</untrusted>.',
+    );
   });
 
   it('sends null to unassign', async () => {
