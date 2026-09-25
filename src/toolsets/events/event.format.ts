@@ -95,12 +95,17 @@ function renderListLine(row: ListRow, includeGroupId: boolean): string {
     .join('  ');
 }
 
-/** `get_latest_event` / `get_event` / `get_project_event`. */
+/**
+ * `get_latest_event` / `get_event` / `get_project_event`. `json()` is
+ * already bounded by `renderEventDetailJson` itself (it drops breadcrumbs
+ * before falling back to a notice, review item 1), so it isn't wrapped in
+ * `boundedJson` again here.
+ */
 export function eventDetailView(event: EventDetail, options: RenderOptions, budget: number): View {
   const parsed = parseEvent(event);
   return {
     text: () => renderEventDetailText(parsed, options, budget),
-    json: () => boundedJson(renderEventDetailJson(parsed, options), budget),
+    json: () => renderEventDetailJson(parsed, options, budget),
   };
 }
 

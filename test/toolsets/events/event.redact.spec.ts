@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { applyJsonPointer, InvalidPointerError } from '../../../src/toolsets/events/event.pointer';
-import { redactEventPayload } from '../../../src/toolsets/events/event.redact';
+import {
+  redactEventPayload,
+  redactQueryString,
+  redactUrl,
+} from '../../../src/toolsets/events/event.redact';
 
 // Acceptance 5, 6: user IP/geo, cookies and secret headers never survive
 // redaction, in either header shape; an invalid pointer is a validation error.
@@ -175,5 +179,104 @@ describe('applyJsonPointer (acceptance 6)', () => {
     expect(() => applyJsonPointer(doc, '/constructor')).toThrow(InvalidPointerError);
     expect(() => applyJsonPointer(doc, '/contexts/constructor')).toThrow(InvalidPointerError);
     expect(() => applyJsonPointer(doc, '/toString')).toThrow(InvalidPointerError);
+  });
+});
+
+describe('redactQueryString / redactUrl (review 3)', () => {
+  it('redacts secret-named query parameter values, keeping the rest', () => {
+    expect(redactQueryString('q=hello&token=abc123&page=2')).toBe(
+      'q=hello&token=[redacted]&page=2',
+    );
+  });
+
+  it('matches secret names case-insensitively and by pattern (password, api_key, …)', () => {
+    expect(redactQueryString('Password=hunter2&X-Api-Key=xyz')).toBe(
+      'Password=[redacted]&X-Api-Key=[redacted]',
+    );
+  });
+
+  it('leaves a query string with no secret-named parameter untouched', () => {
+    expect(redactQueryString('q=hello&page=2')).toBe('q=hello&page=2');
+  });
+
+  it('redacts a secret-named query parameter embedded in a URL, keeping the rest of the URL', () => {
+    const url = 'https://example.com/api/login?user=alice&token=abc123#section';
+    expect(redactUrl(url)).toBe(
+      'https://example.com/api/login?user=alice&token=[redacted]#section',
+    );
+  });
+
+  it('leaves a URL with no query string untouched', () => {
+    expect(redactUrl('https://example.com/path')).toBe('https://example.com/path');
+  });
+});
+
+describe('redactEventPayload — request.data, query/url params, ip tags (review 3)', () => {
+  it('redacts secret-named fields inside request.data (a record)', () => {
+    const redacted = redactEventPayload({
+      request: { data: { username: 'alice', password: 'hunter2', csrf_token: 'xyz' } },
+    }) as { request: { data: Record<string, unknown> } };
+    expect(redacted.request.data.username).toBe('alice');
+    expect(redacted.request.data.password).toBe('[redacted]');
+    expect(redacted.request.data.csrf_token).toBe('[redacted]');
+  });
+
+  it('redacts secret-named fields inside request.data (a form-encoded string)', () => {
+    const redacted = redactEventPayload({
+      request: { data: 'username=alice&password=hunter2' },
+    }) as { request: { data: string } };
+    expect(redacted.request.data).toBe('username=alice&password=[redacted]');
+  });
+
+  it('redacts secret-named query parameters, as pairs, an object, or a string', () => {
+    const asPairs = redactEventPayload({
+      request: {
+        query: [
+          ['q', '1'],
+          ['api_key', 'secret-value'],
+        ],
+      },
+    }) as { request: { query: [string, string][] } };
+    expect(asPairs.request.query).toEqual([
+      ['q', '1'],
+      ['api_key', '[redacted]'],
+    ]);
+
+    const asObject = redactEventPayload({
+      request: { query: { q: '1', token: 'secret-value' } },
+    }) as { request: { query: Record<string, unknown> } };
+    expect(asObject.request.query.token).toBe('[redacted]');
+
+    const asString = redactEventPayload({
+      request: { query: 'q=1&token=secret-value' },
+    }) as { request: { query: string } };
+    expect(asString.request.query).toBe('q=1&token=[redacted]');
+  });
+
+  it('redacts a secret-named query parameter in request.url', () => {
+    const redacted = redactEventPayload({
+      request: { url: 'https://example.com/login?token=secret-value' },
+    }) as { request: { url: string } };
+    expect(redacted.request.url).toBe('https://example.com/login?token=[redacted]');
+  });
+
+  it('drops a tag whose key is user.ip, ip or client_ip (array shape)', () => {
+    const redacted = redactEventPayload({
+      tags: [
+        { key: 'user.ip', value: '203.0.113.9' },
+        { key: 'ip', value: '203.0.113.9' },
+        { key: 'client_ip', value: '203.0.113.9' },
+        { key: 'release', value: '1.0' },
+      ],
+    }) as { tags: { key: string; value: string }[] };
+    expect(redacted.tags).toEqual([{ key: 'release', value: '1.0' }]);
+  });
+
+  it('drops an ip-named tag key when tags is an object map', () => {
+    const redacted = redactEventPayload({
+      tags: { ip: '203.0.113.9', release: '1.0' },
+    }) as { tags: Record<string, unknown> };
+    expect(redacted.tags.ip).toBeUndefined();
+    expect(redacted.tags.release).toBe('1.0');
   });
 });

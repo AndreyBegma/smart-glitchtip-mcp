@@ -104,18 +104,25 @@ the whole document.
 
 Before `path` is applied, the payload is redacted (D-20): `user.ip_address`,
 `user.geo` and `user.client_ip` are removed; `request.cookies` becomes
-`"[redacted]"`; any header naming a secret (`Cookie`, `Set-Cookie`,
-`Authorization`, `Proxy-Authorization`, an API key or token — matched by
-`/cookie|authorization|token|api-?key|secret/i`) or the caller's real IP
-(`X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `CF-Connecting-IP`,
-`True-Client-IP`) becomes `"[redacted]"` in `request.headers`, whether that's
-an array of `[key, value]` pairs or an object, names compared
-case-insensitively; `request.env.REMOTE_ADDR` is removed. The same rules
-apply to the legacy `sentry.interfaces.User`/`sentry.interfaces.Http` keys,
-an `entries[]` entry of type `request`, and `contexts.*.client_ip`, wherever
+`"[redacted]"`; a name matching
+`/cookie|authorization|token|api[-_]?key|secret|password/i` (case-insensitive
+— covers `Cookie`, `Set-Cookie`, `Authorization`, `Proxy-Authorization`, API
+keys, tokens, passwords) or the caller's real IP (`X-Forwarded-For`,
+`X-Real-IP`, `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`) becomes
+`"[redacted]"` wherever it names a field: a header in `request.headers`
+(array of `[key, value]` pairs or an object), a query parameter in
+`request.query` or embedded in `request.url` (pairs, object or a raw
+`key=value&…` string), or a field of the request body `request.data` (a
+record's matching keys, or a form-encoded string's matching parameters);
+`request.env.REMOTE_ADDR` is removed. A tag whose key is `user.ip`, `ip` or
+`client_ip` is dropped outright, not merely redacted. The same rules apply
+to the legacy `sentry.interfaces.User`/`sentry.interfaces.Http` keys, an
+`entries[]` entry of type `request`, and `contexts.*.client_ip`, wherever
 they appear in the payload. The `Request` section rendered by
-`get_event`/`get_latest_event`/`get_project_event` gets the same header
-redaction when `include_request_headers: true`.
+`get_event`/`get_latest_event`/`get_project_event` redacts the URL and query
+string the same way always (there's no request body in that section to
+redact), and the header list too when `include_request_headers: true`; a
+rendered Tags section never shows an IP-named tag either.
 
 An invalid JSON Pointer, or one that matches nothing in the (already
 redacted) payload, is a tool error naming the first path segment it could not

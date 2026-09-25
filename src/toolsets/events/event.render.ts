@@ -1,7 +1,7 @@
 import { keyValues } from '../../format/table';
 import { untrusted } from '../../format/untrusted';
 import { safeStringify, truncate } from './event.guards';
-import { redactHeaderPairs } from './event.redact';
+import { redactHeaderPairs, redactQueryString, redactUrl } from './event.redact';
 import type {
   ParsedBreadcrumb,
   ParsedEvent,
@@ -19,8 +19,14 @@ const VAR_LIMIT = 200;
 const MAX_EXCEPTION_VALUES = 10;
 const MAX_FRAMES = 50;
 const TRUNCATION_MARKER = '\n… truncated for budget …';
+const CLOSE_TAG = '</untrusted>';
 /** Sections dropped, in this order, before the foundation's tail-cut budget runs (spec AC7). */
 const DROPPABLE_SECTIONS = ['breadcrumbs', 'tags', 'context'] as const;
+/** `format: "json"` on the three detail tools: no `path` param, so the hint differs from get_event_json's. */
+const DETAIL_JSON_TRUNCATED_NOTICE = {
+  truncated: true,
+  hint: 'reduce breadcrumbs or use get_event_json with path',
+};
 
 interface Section {
   readonly key: string;
@@ -53,13 +59,21 @@ function assemble(sections: readonly Section[]): string {
   return sections.map((section) => section.text).join('\n\n');
 }
 
-/** A last-resort cut ahead of the foundation's own, guaranteed not to leave a fence open. */
+/**
+ * A last-resort cut ahead of the foundation's own, guaranteed `<= budget`
+ * and never leaving a fence open. Room for the marker *and* every closing
+ * tag the cut could possibly need is reserved before cutting — using the
+ * fence count of the *whole* text as the (monotonically safe) upper bound —
+ * so appending the actual closing tags afterwards can never push past budget.
+ */
 function closeFencesAtCut(text: string, budget: number): string {
-  const room = Math.max(0, budget - TRUNCATION_MARKER.length);
+  const maxOpens = (text.match(/<untrusted /g) ?? []).length;
+  const reserve = TRUNCATION_MARKER.length + maxOpens * CLOSE_TAG.length;
+  const room = Math.max(0, budget - reserve);
   const cut = text.slice(0, room);
   const opens = (cut.match(/<untrusted /g) ?? []).length;
   const closes = (cut.match(/<\/untrusted>/g) ?? []).length;
-  const closing = '</untrusted>'.repeat(Math.max(0, opens - closes));
+  const closing = CLOSE_TAG.repeat(Math.max(0, opens - closes));
   return `${cut}${closing}${TRUNCATION_MARKER}`;
 }
 
@@ -205,11 +219,10 @@ function renderRequestSection(
 ): string | undefined {
   if (!request) return undefined;
   const lines: string[] = [];
-  const summary = [request.method, request.url]
-    .filter((part): part is string => Boolean(part))
-    .join(' ');
+  const url = request.url ? redactUrl(request.url) : undefined;
+  const summary = [request.method, url].filter((part): part is string => Boolean(part)).join(' ');
   if (summary) lines.push(summary);
-  if (request.query) lines.push(`query: ${request.query}`);
+  if (request.query) lines.push(`query: ${redactQueryString(request.query)}`);
   if (includeHeaders && request.headers.length > 0) {
     for (const [name, value] of redactHeaderPairs(request.headers)) lines.push(`${name}: ${value}`);
   }
@@ -243,22 +256,58 @@ function renderFooter(parsed: ParsedEvent): string {
   return `Full payload: get_event_json(issue_id: ${parsed.groupID}, event_id: ${parsed.id}).`;
 }
 
-/** The `json` format projection (spec: "header, exceptions with in-app frames, breadcrumbs"). */
-export function renderEventDetailJson(parsed: ParsedEvent, options: RenderOptions): unknown {
+/**
+ * The `json` format projection (spec: "header, exceptions with in-app
+ * frames, breadcrumbs"), trimmed to fit `budget`: breadcrumbs are dropped
+ * one at a time (most recent kept) before the header or exceptions are ever
+ * touched. Falls back to a fixed, tiny, always-valid notice only if the
+ * header and exceptions alone still don't fit — never a mid-object cut that
+ * would leave the JSON unparseable (review item 12).
+ */
+export function renderEventDetailJson(
+  parsed: ParsedEvent,
+  options: RenderOptions,
+  budget: number,
+): unknown {
+  const header = projectHeader(parsed);
+  const exceptions = projectExceptions(parsed.exception, options);
+  let breadcrumbCount = Math.min(options.breadcrumbs, parsed.breadcrumbs.length);
+  let candidate = projectDetailJson(header, exceptions, parsed.breadcrumbs, breadcrumbCount);
+  while (jsonLength(candidate) > budget && breadcrumbCount > 0) {
+    breadcrumbCount--;
+    candidate = projectDetailJson(header, exceptions, parsed.breadcrumbs, breadcrumbCount);
+  }
+  return jsonLength(candidate) <= budget ? candidate : DETAIL_JSON_TRUNCATED_NOTICE;
+}
+
+function projectHeader(parsed: ParsedEvent) {
   return {
-    header: {
-      id: parsed.id,
-      dateReceived: parsed.dateReceived,
-      level: parsed.level ?? null,
-      platform: parsed.platform ?? null,
-      release: parsed.release ?? null,
-      environment: parsed.environment ?? null,
-      nextEventID: parsed.nextEventID ?? null,
-      previousEventID: parsed.previousEventID ?? null,
-    },
-    exceptions: projectExceptions(parsed.exception, options),
-    breadcrumbs: parsed.breadcrumbs.slice(-options.breadcrumbs).map((crumb) => ({ ...crumb })),
+    id: parsed.id,
+    dateReceived: parsed.dateReceived,
+    level: parsed.level ?? null,
+    platform: parsed.platform ?? null,
+    release: parsed.release ?? null,
+    environment: parsed.environment ?? null,
+    nextEventID: parsed.nextEventID ?? null,
+    previousEventID: parsed.previousEventID ?? null,
   };
+}
+
+function projectDetailJson(
+  header: unknown,
+  exceptions: unknown,
+  breadcrumbs: readonly ParsedBreadcrumb[],
+  count: number,
+) {
+  return {
+    header,
+    exceptions,
+    breadcrumbs: breadcrumbs.slice(-count).map((crumb) => ({ ...crumb })),
+  };
+}
+
+function jsonLength(data: unknown): number {
+  return JSON.stringify(data, null, 2).length;
 }
 
 function projectExceptions(

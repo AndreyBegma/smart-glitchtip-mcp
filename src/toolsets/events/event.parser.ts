@@ -9,6 +9,7 @@ import {
   safeStringify,
   truncate,
 } from './event.guards';
+import { isIpTagKey } from './event.redact';
 import type {
   ParsedBreadcrumb,
   ParsedContextLine,
@@ -199,6 +200,7 @@ function parsePairs(raw: unknown): ReadonlyArray<readonly [string, string]> {
   );
 }
 
+/** Drops `user.ip`/`ip`/`client_ip` tags (D-20) rather than showing them redacted. */
 export function parseTags(tags: unknown): readonly ParsedTag[] {
   const array = asArray(tags);
   if (!array) return [];
@@ -214,7 +216,7 @@ export function parseTags(tags: unknown): readonly ParsedTag[] {
         ? { key: firstKey, value: firstValue }
         : undefined;
     })
-    .filter((tag): tag is ParsedTag => tag !== undefined);
+    .filter((tag): tag is ParsedTag => tag !== undefined && !isIpTagKey(tag.key));
 }
 
 function parseContexts(contexts: EventDetail['contexts']): readonly ParsedContextLine[] {

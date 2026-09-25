@@ -143,7 +143,11 @@ describe('untrusted content (acceptance 8)', () => {
 
 describe('json format (acceptance 4)', () => {
   it('projects header, exceptions with in-app frames, and breadcrumbs — not the raw payload', () => {
-    const projected = renderEventDetailJson(parseEvent(pythonMixedFrames), DEFAULT_OPTIONS) as {
+    const projected = renderEventDetailJson(
+      parseEvent(pythonMixedFrames),
+      DEFAULT_OPTIONS,
+      HUGE_BUDGET,
+    ) as {
       header: { id: string };
       exceptions: { frames: { inApp: boolean | null }[] }[];
     };
@@ -190,6 +194,35 @@ describe('fence-safe truncation (review 7)', () => {
     const closes = text.match(/<\/untrusted>/g) ?? [];
     expect(opens.length).toBe(closes.length);
     expect(text).toContain('truncated for budget');
+    expect(text.length).toBeLessThanOrEqual(1200);
+  });
+
+  it('never exceeds budget, whatever it reserves for the closing tags it might add (review 2)', () => {
+    const bigValue = (n: number) => `V${n}-${'x'.repeat(900)}`;
+    const manyValues = buildEvent({
+      id: 'evt-huge-chain-2',
+      title: 'ChainedError: overloaded',
+      entries: [
+        {
+          type: 'exception',
+          data: {
+            values: [0, 1, 2].map((n) => ({
+              type: 'Error',
+              value: bigValue(n),
+              stacktrace: {
+                frames: [{ filename: `app/${n}.py`, function: `f${n}`, lineno: 1, in_app: true }],
+              },
+            })),
+          },
+        },
+      ],
+    });
+    // Every budget below the full-render length forces the last-resort cut;
+    // "<= budget" must hold for every one of them, not just a convenient value.
+    for (const budget of [50, 200, 500, 800, 1000, 1200, 1500]) {
+      const text = render(manyValues, DEFAULT_OPTIONS, budget);
+      expect(text.length, `budget ${budget}`).toBeLessThanOrEqual(budget);
+    }
   });
 });
 
@@ -258,5 +291,44 @@ describe('breadcrumb/message capping (review 13)', () => {
     });
     const text = render(huge);
     expect(text.length).toBeLessThan(3000);
+  });
+});
+
+describe('Request section redaction (review 3)', () => {
+  it('redacts a secret-named query parameter in both the URL and the query line', () => {
+    const withSecretQuery = buildEvent({
+      id: 'evt-secret-query',
+      entries: [
+        {
+          type: 'request',
+          data: {
+            method: 'GET',
+            url: 'https://example.com/login?token=abc123&user=alice',
+            query: [
+              ['token', 'abc123'],
+              ['user', 'alice'],
+            ],
+            inferredContentType: null,
+          },
+        },
+      ],
+    });
+    const text = render(withSecretQuery);
+    expect(text).not.toContain('abc123');
+    expect(text).toContain('token=[redacted]');
+    expect(text).toContain('user=alice');
+  });
+
+  it('drops an ip-named tag from the Tags section', () => {
+    const withIpTag = buildEvent({
+      id: 'evt-ip-tag',
+      tags: [
+        { key: 'ip', value: '203.0.113.9' },
+        { key: 'release', value: '1.0' },
+      ],
+    });
+    const text = render(withIpTag);
+    expect(text).not.toContain('203.0.113.9');
+    expect(text).toContain('release=1.0');
   });
 });

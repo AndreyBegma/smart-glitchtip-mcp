@@ -114,9 +114,25 @@ describe('JSON results degrade to a truncated notice, never a mid-cut (review 12
     ],
   });
 
-  it('eventDetailView.json() with 100 large breadcrumbs at a tiny budget degrades cleanly', () => {
-    const view = eventDetailView(withManyBreadcrumbs, { ...OPTIONS, breadcrumbs: 100 }, 500);
-    expect(view.json()).toEqual({ truncated: true, hint: 'use path to select part of the event' });
+  it('eventDetailView.json() with 100 large breadcrumbs at budget 20000 keeps header and exceptions, drops breadcrumbs to fit (review 1)', () => {
+    const view = eventDetailView(withManyBreadcrumbs, { ...OPTIONS, breadcrumbs: 100 }, 20_000);
+    const json = view.json() as {
+      header: { id: string };
+      exceptions: unknown[];
+      breadcrumbs: unknown[];
+    };
+    expect(json.header.id).toBe('evt-many-crumbs');
+    expect(Array.isArray(json.exceptions)).toBe(true);
+    expect(json.breadcrumbs.length).toBeLessThan(100);
+    expect(() => JSON.parse(JSON.stringify(json))).not.toThrow();
+  });
+
+  it('eventDetailView.json() falls back to a path-free hint only once even 0 breadcrumbs is too big (review 1)', () => {
+    const view = eventDetailView(withManyBreadcrumbs, { ...OPTIONS, breadcrumbs: 100 }, 50);
+    expect(view.json()).toEqual({
+      truncated: true,
+      hint: 'reduce breadcrumbs or use get_event_json with path',
+    });
     // JSON.parse(JSON.stringify(...)) is what ToolOutput's format: "json" path does.
     expect(() => JSON.parse(JSON.stringify(view.json()))).not.toThrow();
   });

@@ -67,13 +67,13 @@ describe('renderEventDetailText budget trimming (acceptance 7)', () => {
   });
 
   it('drops breadcrumbs, then tags, then context, keeping the stack intact', () => {
-    const text = renderEventDetailText(parsed, OPTIONS, 300);
+    const text = renderEventDetailText(parsed, OPTIONS, 400);
     expect(text).toContain('RuntimeError: budget test');
     expect(text).toContain('at run (app/worker.py:7:');
     expect(text).not.toContain('breadcrumb number');
     expect(text).not.toContain('tag_0=');
     expect(text).not.toContain('runtime: CPython');
     expect(text).toContain('Full payload: get_event_json');
-    expect(text.length).toBeLessThanOrEqual(300);
+    expect(text.length).toBeLessThanOrEqual(400);
   });
 });
