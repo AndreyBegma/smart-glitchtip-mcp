@@ -1,0 +1,93 @@
+# A v* tag publishes npm and the ghcr image (D-15). The tag must already be
+# on main and equal package.json's version (D-16) — a release is a promotion
+# of a commit already merged, never a build from an arbitrary branch.
+when:
+  - event: tag
+    ref: refs/tags/v*
+
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      depth: 0
+
+steps:
+  verify:
+    image: node:24-bookworm
+    commands:
+      - scripts/ci/check-tag-version.sh
+      - git fetch --no-tags origin main
+      - git merge-base --is-ancestor "$CI_COMMIT_SHA" FETCH_HEAD
+
+  install:
+    image: oven/bun:1.4.0
+    commands:
+      - bun install --frozen-lockfile
+    depends_on:
+      - verify
+
+  lint:
+    image: node:24-bookworm-slim
+    commands:
+      - npm run lint
+    depends_on:
+      - install
+
+  typecheck:
+    image: node:24-bookworm-slim
+    commands:
+      - npm run typecheck
+    depends_on:
+      - install
+
+  test:
+    image: node:24-bookworm-slim
+    commands:
+      - npm run test
+    depends_on:
+      - install
+
+  build:
+    image: node:24-bookworm-slim
+    commands:
+      - npm run build
+    depends_on:
+      - install
+
+  npm:
+    # npm publish reads its version from package.json, already checked equal
+    # to the tag by the verify step — no provenance (--provenance is
+    # GitHub-Actions-only).
+    image: node:24-bookworm-slim
+    environment:
+      NPM_TOKEN:
+        from_secret: npm_token
+    commands:
+      - echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+      - npm publish --access public
+    depends_on:
+      - lint
+      - typecheck
+      - test
+      - build
+
+  image:
+    image: woodpeckerci/plugin-docker-buildx
+    settings:
+      repo: ghcr.io/andreybegma/smart-glitchtip-mcp
+      registry: ghcr.io
+      username:
+        from_secret: ghcr_username
+      password:
+        from_secret: ghcr_token
+      tags:
+        - ${CI_COMMIT_TAG}
+        - latest
+      platforms: linux/amd64
+      build_args:
+        - VERSION=${CI_COMMIT_TAG}
+    depends_on:
+      - lint
+      - typecheck
+      - test
+      - build

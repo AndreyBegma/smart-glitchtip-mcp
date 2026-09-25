@@ -1,0 +1,29 @@
+# Real-instance suite (D-14): the mcp-e2e organization only, never per PR.
+# Runs manually or on the e2e-nightly cron, which the orchestrator/owner
+# creates after this PR merges (see docs/deployment.md).
+when:
+  - event: manual
+  - event: cron
+    cron: e2e-nightly
+
+steps:
+  install:
+    image: oven/bun:1.4.0
+    commands:
+      - bun install --frozen-lockfile
+
+  e2e:
+    # Without the three secrets below, test:e2e skips itself and reports
+    # green (foundation behaviour) rather than failing the pipeline.
+    image: node:24-bookworm-slim
+    environment:
+      E2E_GLITCHTIP_URL:
+        from_secret: e2e_glitchtip_url
+      E2E_GLITCHTIP_TOKEN:
+        from_secret: e2e_glitchtip_token
+      E2E_GLITCHTIP_ORG:
+        from_secret: e2e_glitchtip_org
+    commands:
+      - npm run test:e2e
+    depends_on:
+      - install
