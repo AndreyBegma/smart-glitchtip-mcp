@@ -2,6 +2,8 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { type AppConfig, loadConfig } from '../config/config';
+import { ApiGetTools } from '../toolsets/api_request/api-get.tools';
+import { ApiRequestMutations } from '../toolsets/api_request/api-request.mutations';
 import { TOOLSET_NAMES, type ToolsetDefinition, type ToolsetName } from '../toolsets/toolset';
 import { selectToolsets, TOOLSETS } from './toolset.registry';
 
@@ -39,13 +41,26 @@ describe('toolset registry (acceptance 15)', () => {
 
   it('never selects write controllers in read-only mode', () => {
     const readOnly = selectToolsets(config({ readOnly: true }));
-    const readWrite = selectToolsets(config({ readOnly: false }));
+    // Every writeEnabled hook satisfied, so every write controller is selectable.
+    const readWrite = selectToolsets(config({ readOnly: false, apiRequestAllowWrite: true }));
     for (const toolset of TOOLSETS) {
       for (const write of toolset.write) {
         expect(readOnly.controllers).not.toContain(write);
         expect(readWrite.controllers).toContain(write);
       }
     }
+  });
+
+  it('leaves out only the api_request writes when GLITCHTIP_API_REQUEST_ALLOW_WRITE is off', () => {
+    const selection = selectToolsets(config({ readOnly: false, apiRequestAllowWrite: false }));
+    for (const toolset of TOOLSETS) {
+      for (const write of toolset.write) {
+        if (toolset.name === 'api_request') expect(selection.controllers).not.toContain(write);
+        else expect(selection.controllers).toContain(write);
+      }
+    }
+    expect(selection.controllers).toContain(ApiGetTools);
+    expect(selection.controllers).not.toContain(ApiRequestMutations);
   });
 
   it('selects nothing from a disabled toolset', () => {
