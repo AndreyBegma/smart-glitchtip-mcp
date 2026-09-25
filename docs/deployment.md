@@ -54,18 +54,17 @@ Three pipelines, all under `.woodpecker/`:
 | File | Trigger | What it does |
 |---|---|---|
 | `checks.yml` | pull request into `develop` or `main`; push to `develop` | install, lint, typecheck, `api:generate` drift check, test, build, the worker fence test, and (pull requests only) a check that no commit carries a Claude attribution trailer |
-| `release.yml` | a `v*` tag | verifies the tag matches `package.json` and is on `main`, re-runs the checks, then publishes to npm and pushes the ghcr image |
+| `release.yml` | a `v*` tag | verifies the tag matches `package.json` and is on `main`, re-runs the checks, then publishes to npm and pushes the ghcr image with `woodpeckerci/plugin-kaniko` (unprivileged — no Docker socket, no server-side allowlist needed) |
 | `e2e.yml` | manual, or the `e2e-nightly` cron | runs `test:e2e` against the real `mcp-e2e` organization; without its three secrets the suite skips itself and the pipeline stays green (D-14) |
 
 ### Activation (the repository owner / orchestrator, not this PR)
 
 1. Activate `AndreyBegma/smart-glitchtip-mcp` in Woodpecker once this PR is
    open, so its checks run on it.
-2. Add `woodpeckerci/plugin-docker-buildx` to the server's
-   `WOODPECKER_PLUGINS_PRIVILEGED` — `woodpecker-cli lint` flags
-   `release.yml` for this until it is set; it is a server setting, not
-   something a pipeline file can carry.
-3. Create the `e2e-nightly` cron (03:00 UTC) after this PR merges.
+2. Create the `e2e-nightly` cron (03:00 UTC) after this PR merges.
+
+No server-side privileged-plugin allowlist is needed: `release.yml` builds
+the image with `woodpeckerci/plugin-kaniko`, which needs no Docker socket.
 
 ### Secrets
 

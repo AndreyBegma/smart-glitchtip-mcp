@@ -72,10 +72,13 @@ steps:
       - build
 
   image:
-    image: woodpeckerci/plugin-docker-buildx
+    # Unprivileged builder — no Docker socket, no WOODPECKER_PLUGINS_PRIVILEGED
+    # entry needed on the server. Builds for the agent's own architecture
+    # (amd64 — the only platform this image targets for now).
+    image: woodpeckerci/plugin-kaniko
     settings:
-      repo: ghcr.io/andreybegma/smart-glitchtip-mcp
       registry: ghcr.io
+      repo: andreybegma/smart-glitchtip-mcp
       username:
         from_secret: ghcr_username
       password:
@@ -83,7 +86,6 @@ steps:
       tags:
         - ${CI_COMMIT_TAG}
         - latest
-      platforms: linux/amd64
       build_args:
         - VERSION=${CI_COMMIT_TAG}
     depends_on:
