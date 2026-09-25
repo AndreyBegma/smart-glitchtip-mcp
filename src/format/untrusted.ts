@@ -11,11 +11,20 @@
  *   release refs, commits, repositories…).
  * - `external`: text a third party produced and GlitchTip relays.
  */
-export type UntrustedSource =
-  | 'glitchtip-event'
-  | 'glitchtip-user'
-  | 'glitchtip-config'
-  | 'external';
+export const UNTRUSTED_SOURCES = [
+  'glitchtip-event',
+  'glitchtip-user',
+  'glitchtip-config',
+  'external',
+] as const;
+export type UntrustedSource = (typeof UNTRUSTED_SOURCES)[number];
+
+/** Exactly the opening tag `untrusted()` writes, and nothing else that looks like it. */
+export const UNTRUSTED_OPEN_TAG = new RegExp(
+  `<untrusted source="(?:${UNTRUSTED_SOURCES.join('|')})" field="[A-Za-z0-9_.-]*">`,
+  'g',
+);
+export const UNTRUSTED_CLOSE_TAG = '</untrusted>';
 
 /**
  * Fences text that came from GlitchTip (D-18). It is marked as data: the
@@ -30,5 +39,5 @@ export function untrusted(
 ): string {
   const safeField = field.replace(/[^A-Za-z0-9_.-]/g, '');
   const body = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  return `<untrusted source="${source}" field="${safeField}">${body}</untrusted>`;
+  return `<untrusted source="${source}" field="${safeField}">${body}${UNTRUSTED_CLOSE_TAG}`;
 }

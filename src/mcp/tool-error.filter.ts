@@ -58,10 +58,34 @@ function reject(message: string): Observable<never> {
   return throwError(() => ({ status: 'error', message }));
 }
 
+const CAUSE_DEPTH = 5;
+
+/**
+ * The stack and up to five causes. A cause chain can be cyclic or deep, and
+ * this runs inside the error path itself, so it is bounded and never recurses.
+ */
 function describe(exception: unknown): string {
-  if (!(exception instanceof Error)) return String(exception);
-  const own = exception.stack ?? `${exception.name}: ${exception.message}`;
-  return exception.cause === undefined ? own : `${own}\nCaused by: ${describe(exception.cause)}`;
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = exception;
+  for (let depth = 0; current !== undefined; depth++) {
+    if (depth > CAUSE_DEPTH) {
+      parts.push('(further causes omitted)');
+      break;
+    }
+    if (seen.has(current)) {
+      parts.push('(cyclic cause)');
+      break;
+    }
+    seen.add(current);
+    if (!(current instanceof Error)) {
+      parts.push(String(current));
+      break;
+    }
+    parts.push(current.stack ?? `${current.name}: ${current.message}`);
+    current = current.cause;
+  }
+  return parts.join('\nCaused by: ');
 }
 
 function viewOperation(exception: unknown): string {

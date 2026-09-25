@@ -1,5 +1,9 @@
+import { UNTRUSTED_CLOSE_TAG, UNTRUSTED_OPEN_TAG } from './untrusted';
+
 const FENCE_OPEN = '<untrusted';
-const FENCE_CLOSE = '</untrusted>';
+const FENCE_CLOSE = UNTRUSTED_CLOSE_TAG;
+/** Exactly the tags `untrusted()` writes; look-alikes in unfenced text do not count. */
+const FENCE_TAG = new RegExp(`${UNTRUSTED_OPEN_TAG.source}|${FENCE_CLOSE}`, 'g');
 
 /**
  * Bounds a text tool result to `budget` characters (D-12). The cut falls on a
@@ -9,7 +13,8 @@ const FENCE_CLOSE = '</untrusted>';
  * A cut inside an `<untrusted>` fence (D-18) closes the fence before the
  * marker, so the marker — and anything a client appends — never reads as
  * part of the fenced data. `untrusted()` escapes every `<` in the payload, so
- * each fence tag in the text is one of ours and counting them is exact.
+ * no tag can appear inside a fence; fences never nest, and walking the exact
+ * tags in order tells whether the cut is inside one.
  */
 export function applyBudget(text: string, budget: number): string {
   if (text.length <= budget) return text;
@@ -44,11 +49,9 @@ function withoutPartialTag(kept: string): string {
 }
 
 function fenceOpen(text: string): boolean {
-  return count(text, FENCE_OPEN) > count(text, FENCE_CLOSE);
-}
-
-function count(text: string, needle: string): number {
-  return text.split(needle).length - 1;
+  let open = false;
+  for (const [tag] of text.matchAll(FENCE_TAG)) open = tag !== FENCE_CLOSE;
+  return open;
 }
 
 function marker(dropped: number, total: number): string {

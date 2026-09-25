@@ -89,7 +89,11 @@ Search issues in an organization, newest activity first.
 for every status. `start`/`end` must be ISO 8601 date-times (zod-validated
 before any request). Text output is one row per issue (`shortId`, `id`,
 `level`, `status`, `count`, `users`, `lastSeen`, `project`, `assignee`)
-followed by the title, cut to 120 characters and untrusted-fenced. Empty
+followed by the title, cut to 120 characters and untrusted-fenced. The
+`project` cell is the project slug, and `assignee` is `team:<slug>` or
+`user:<id>`. Free-text names are shown fenced by `get_issue` (as
+`glitchtip-config` and `glitchtip-user`), never in a table cell, where the
+80-character cut would split a fence. Empty
 result: `` No issues match `<query>` in <org>[/<project>]. ``, or
 `No issues in <org> (all statuses).` when `query: ""`.
 

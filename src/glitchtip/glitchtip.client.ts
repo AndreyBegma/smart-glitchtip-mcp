@@ -7,6 +7,7 @@ import {
   malformedListError,
   malformedResponseError,
   type Operation,
+  refusedRequestError,
   timeoutError,
   unreachableError,
 } from './glitchtip.errors';
@@ -16,6 +17,7 @@ import {
   assertCallerHeaders,
   pathSegmentGuard,
   type RawQuery,
+  rawMethod,
   rawRequestUrl,
 } from './request-guards';
 
@@ -115,7 +117,7 @@ export class GlitchTipClient {
   ): Promise<Page<T>> {
     const result = await this.perform(operation, request, options);
     if (!Array.isArray(result.data)) throw malformedListError(operation);
-    const { headers } = result.response;
+    const headers = this.redactedHeaders(result.response.headers);
     return { items: result.data, nextCursor: parseNextCursor(headers.get('link')), headers };
   }
 
@@ -134,22 +136,27 @@ export class GlitchTipClient {
     options: RawRequestOptions = {},
   ): Promise<RawResponse> {
     const timeoutMs = this.timeoutFor(options);
+    // Everything below may come from an agent (the api_request toolset), so
+    // each input is checked here and refused as `invalid` — never left to
+    // throw a TypeError that would read as a malformed GlitchTip response.
+    const verb = rawMethod(method, options.body !== undefined);
     const url = rawRequestUrl(this.instance.url, operation, path, options.query);
     assertCallerHeaders(options.headers ?? {});
-    const headers = new Headers({ ...this.defaultHeaders(), ...options.headers });
-    const request = new Request(url, {
-      method: method.toUpperCase(),
-      headers,
-      body: rawBody(options.body, headers),
-      redirect: 'manual',
-    });
+    const request = buildRawRequest(url, verb, this.defaultHeaders(), options);
     try {
       const response = await this.send(request, timeoutMs);
       const text = this.instance.redact(await response.text());
-      return { status: response.status, headers: response.headers, text };
+      return { status: response.status, headers: this.redactedHeaders(response.headers), text };
     } catch (error) {
       throw this.asGlitchTipError(error, timeoutMs);
     }
+  }
+
+  /** A copy of response headers with the token removed from every value. */
+  private redactedHeaders(headers: Headers): Headers {
+    const copy = new Headers();
+    for (const [name, value] of headers) copy.append(name, this.instance.redact(value));
+    return copy;
   }
 
   private async perform<T>(
@@ -258,6 +265,26 @@ export class GlitchTipClient {
   }
 }
 
+function buildRawRequest(
+  url: URL,
+  method: string,
+  defaults: Record<string, string>,
+  options: RawRequestOptions,
+): Request {
+  let headers: Headers;
+  try {
+    headers = new Headers({ ...defaults, ...options.headers });
+  } catch {
+    throw refusedRequestError('A header name or value is not valid.');
+  }
+  return new Request(url, {
+    method,
+    headers,
+    body: rawBody(options.body, headers),
+    redirect: 'manual',
+  });
+}
+
 /** A raw call's body: passed through when fetch can send it, JSON otherwise. */
 function rawBody(body: unknown, headers: Headers): RequestInit['body'] {
   if (body === undefined) return undefined;
@@ -272,7 +299,11 @@ function rawBody(body: unknown, headers: Headers): RequestInit['body'] {
     return body as RequestInit['body'];
   }
   if (!headers.has('content-type')) headers.set('content-type', 'application/json');
-  return JSON.stringify(body);
+  try {
+    return JSON.stringify(body);
+  } catch {
+    throw refusedRequestError('The body cannot be sent as JSON.');
+  }
 }
 
 function isRetryableStatus(status: number): boolean {

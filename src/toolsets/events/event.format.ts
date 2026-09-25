@@ -100,22 +100,23 @@ function renderListLine(row: ListRow, includeGroupId: boolean): string {
  * `get_latest_event` / `get_event` / `get_project_event`. `json()` is
  * already bounded by `renderEventDetailJson` itself (it drops breadcrumbs
  * before falling back to a notice, review item 1), so it isn't wrapped in
- * `boundedJson` again here.
+ * `boundedJson` again here. It is given the budget less the payload fence
+ * that `ToolOutput` adds around JSON output.
  */
 export function eventDetailView(event: EventDetail, options: RenderOptions, budget: number): View {
   const parsed = parseEvent(event);
   return {
     untrusted: { field: 'payload', source: 'glitchtip-event' },
     text: () => renderEventDetailText(parsed, options, budget),
-    json: () => renderEventDetailJson(parsed, options, budget),
+    json: () => renderEventDetailJson(parsed, options, budget - FENCE_OVERHEAD),
   };
 }
 
 /**
  * `get_event_json`: the redacted raw payload (D-20), optionally narrowed by
- * a JSON Pointer. The `text` result is fenced (D-18); `format: "json"`
- * returns the object itself, unfenced, so it parses cleanly — fencing JSON
- * output is the foundation's job (BUG-20260925-006), not this toolset's.
+ * a JSON Pointer. Both formats are fenced (D-18): the text form here, the
+ * JSON form by `ToolOutput` through the view's `untrusted` declaration
+ * (BUG-20260925-006), which keeps the JSON parseable between the tags.
  */
 export function eventJsonView(raw: unknown, pointer: string | undefined, budget: number): View {
   const redacted = redactEventPayload(raw);
@@ -135,16 +136,19 @@ function boundedText(data: unknown, budget: number): string {
 }
 
 /**
- * The `json` format: the object itself (never fenced — `ToolOutput`
- * `JSON.stringify`s it, and a fence around that would only be valid once
- * escaped, i.e. not really a fence). Degrades to a fixed, tiny, always-valid
- * notice instead of a mid-object tail cut that would leave the JSON
- * unparseable (spec AC7's "stack intact" concern, applied to JSON output).
+ * The `json` format: the object itself, which `ToolOutput` serialises and
+ * wraps in one payload fence. It is measured as it will be sent — fenced,
+ * with `<` and `&` escaped — so a payload just under the budget unfenced
+ * still gets the fixed, always-valid notice instead of the foundation's
+ * generic shrink (spec AC7's "stack intact" concern, applied to JSON output).
  */
 function boundedJson(data: unknown, budget: number): unknown {
-  const pretty = JSON.stringify(data, null, 2);
-  return pretty.length <= budget ? data : TRUNCATED_NOTICE;
+  const fenced = untrusted('payload', JSON.stringify(data, null, 2));
+  return fenced.length <= budget ? data : TRUNCATED_NOTICE;
 }
+
+/** What the payload fence adds around JSON output (tags only; escaping is measured where it can be). */
+const FENCE_OVERHEAD = untrusted('payload', '').length;
 
 function day(iso: string): string {
   return iso.length >= 10 ? iso.slice(0, 10) : iso;

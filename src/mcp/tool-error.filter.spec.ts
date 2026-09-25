@@ -121,6 +121,25 @@ describe('ToolErrorFilter', () => {
     for (const secret of [ENV_TOKEN, MCP_SECRET, CLIENT_TOKEN]) expect(text).not.toContain(secret);
   });
 
+  it('logs a cyclic cause chain without overflowing, and caps a deep one at five causes', async () => {
+    const logged = captureErrors();
+    const a = new TypeError('first');
+    const b = new Error('second', { cause: a });
+    Object.defineProperty(a, 'cause', { value: b });
+    const cyclic = (await rejection(a)) as { message: string };
+    expect(cyclic.message).toMatch(/did not expect for this call/);
+    expect(logged.join('\n')).toContain('(cyclic cause)');
+
+    let deep: Error = new Error('root cause 0');
+    for (let i = 1; i <= 20; i++) deep = new Error(`cause ${i}`, { cause: deep });
+    logged.length = 0;
+    await rejection(deep);
+    const text = logged.join('\n');
+    expect(text.match(/Caused by: /g)).toHaveLength(6);
+    expect(text).toContain('(further causes omitted)');
+    expect(text).not.toContain('root cause 0');
+  });
+
   it('strips the env token, MCP_AUTH_TOKEN and the pass-through token from the log', async () => {
     const logged = captureErrors();
     const error = new Error(`raw ${ENV_TOKEN} and ${MCP_SECRET} and ${CLIENT_TOKEN}`);

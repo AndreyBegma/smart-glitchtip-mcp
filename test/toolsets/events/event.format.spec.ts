@@ -144,6 +144,16 @@ describe('JSON results degrade to a truncated notice, never a mid-cut (review 12
     expect(view.json()).toEqual({ truncated: true, hint: 'use path to select part of the event' });
   });
 
+  it('eventJsonView.json() measures the fenced, escaped form: just under the budget unfenced still degrades', () => {
+    const raw = { note: '<'.repeat(300) };
+    const unfencedLength = JSON.stringify(raw, null, 2).length;
+    // Fits unfenced by a margin, but not once fenced and escaped (`<` → `&lt;`).
+    const view = eventJsonView(raw, undefined, unfencedLength + 10);
+    expect(view.json()).toEqual({ truncated: true, hint: 'use path to select part of the event' });
+    const roomy = eventJsonView(raw, undefined, 10_000);
+    expect(roomy.json()).toEqual(raw);
+  });
+
   it('eventJsonView.text() degrades to a fenced notice at a tiny budget', () => {
     const raw = { entries: Array.from({ length: 500 }, (_, i) => ({ i, pad: 'x'.repeat(200) })) };
     const view = eventJsonView(raw, undefined, 500);

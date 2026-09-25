@@ -64,6 +64,17 @@ describe('applyBudget inside a fence (BUG-20260925-006 acceptance 2)', () => {
     }
   });
 
+  it('is not fooled by fence look-alikes in unfenced text', () => {
+    // A look-alike opening tag outside any fence must not trigger a close.
+    const fake = `name: <untrusted evil\n${Array.from({ length: 200 }, (_, i) => `row ${i}`).join('\n')}`;
+    const [fakeBody] = applyBudget(fake, 500).split('\n… truncated');
+    expect(fakeBody.endsWith('</untrusted>')).toBe(false);
+    // A real fence opened after a look-alike close is still seen as open.
+    const real = `note </untrusted> here\n${untrusted('message', lines(300))}`;
+    const [realBody] = applyBudget(real, 2_000).split('\n… truncated');
+    expect(realBody.endsWith('</untrusted>')).toBe(true);
+  });
+
   it('leaves a cut outside any fence exactly as before', () => {
     const closed = `${untrusted('title', 'short')}\n${Array.from({ length: 200 }, (_, i) => `row ${i}`).join('\n')}`;
     const out = applyBudget(closed, 500);

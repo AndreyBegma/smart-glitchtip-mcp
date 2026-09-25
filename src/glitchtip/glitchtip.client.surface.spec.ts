@@ -69,6 +69,21 @@ describe('page()', () => {
     mock.json('GET', ORGS, [], { headers: { 'x-hits': '1234' } });
     expect((await listOrgs(client)).headers.get('x-hits')).toBe('1234');
   });
+
+  it('scrubs the token from the response headers it returns', async () => {
+    const { mock, client } = setup();
+    mock.json('GET', ORGS, [], { headers: { 'x-debug': `auth=Bearer ${TOKEN}`, 'x-hits': '2' } });
+    const { headers } = await listOrgs(client);
+    expect(headers.get('x-debug')).toBe('auth=Bearer [redacted]');
+    for (const [, value] of headers) expect(value).not.toContain(TOKEN);
+  });
+
+  it('reports a 204 or an empty 200 on a list as malformed, not as an empty page', async () => {
+    const { mock, client } = setup();
+    mock.on('GET', ORGS, new Response(null, { status: 204 }), new Response('', { status: 200 }));
+    expect((await failure(listOrgs(client))).kind).toBe('malformed');
+    expect((await failure(listOrgs(client))).kind).toBe('malformed');
+  });
 });
 
 describe('raw()', () => {
@@ -99,7 +114,6 @@ describe('raw()', () => {
     ['another origin', '//evil.test/api/0/'],
     ['outside /api/', '/admin/'],
     ['/api/ escaped with ..', '/api/../admin/'],
-    ['/api/ escaped with encoded dots', '/api/%2e%2e/admin/'],
     ['the bare /api', '/api'],
   ])('refuses a path that resolves to %s, with no request', async (_, path) => {
     const { mock, client } = setup();
@@ -109,6 +123,72 @@ describe('raw()', () => {
     expect(mock.requests).toEqual([]);
   });
 
+  it.each([
+    '/api/%2e%2e/admin/',
+    '/api/0/%2E/x/',
+    '/api/0/a%2fb/',
+    '/api/0/a%2Fb/',
+    '/api/0/a%5cb/',
+    '/api/0/a%5Cb/',
+  ])('refuses an encoded separator or dot in %s, with no request', async (path) => {
+    const { mock, client } = setup();
+    const error = await failure(client.raw(OP, 'GET', path));
+    expect(error.kind).toBe('invalid');
+    expect(error.message).toMatch(/may not contain an encoded/);
+    expect(mock.requests).toEqual([]);
+  });
+
+  it.each(['TRACE', 'CONNECT', 'OPTIONS', 'FOO', 'GET\r\nX'])(
+    'refuses the method %j as invalid, with no request',
+    async (method) => {
+      const { mock, client } = setup();
+      const error = await failure(client.raw(OP, method, '/api/0/'));
+      expect(error.kind).toBe('invalid');
+      expect(error.message).toMatch(/^The method must be one of/);
+      expect(mock.requests).toEqual([]);
+    },
+  );
+
+  it.each(['GET', 'head'])(
+    'refuses a body on %s as invalid, never as malformed',
+    async (method) => {
+      const { mock, client } = setup();
+      const error = await failure(client.raw(OP, method, '/api/0/', { body: { a: 1 } }));
+      expect(error.kind).toBe('invalid');
+      expect(error.message).toMatch(/cannot carry a body/);
+      expect(mock.requests).toEqual([]);
+    },
+  );
+
+  it('refuses an invalid header value and a body that is not JSON as invalid', async () => {
+    const { mock, client } = setup();
+    const header = await failure(
+      client.raw(OP, 'POST', '/api/0/', { headers: { 'x-a': 'bad\r\nvalue' } }),
+    );
+    expect(header.kind).toBe('invalid');
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const body = await failure(client.raw(OP, 'POST', '/api/0/', { body: cyclic }));
+    expect(body.kind).toBe('invalid');
+    expect(mock.requests).toEqual([]);
+  });
+
+  it('scrubs the token from every response header (Location, echoes)', async () => {
+    const { mock, client } = setup();
+    mock.on(
+      'GET',
+      `${API}/moved/`,
+      new Response(null, {
+        status: 302,
+        headers: { location: `${BASE}/login?token=${TOKEN}`, 'x-echo': `Bearer ${TOKEN}` },
+      }),
+    );
+    const response = await client.raw(OP, 'GET', '/api/0/moved/');
+    for (const [, value] of response.headers) expect(value).not.toContain(TOKEN);
+    expect(response.headers.get('location')).toBe(`${BASE}/login?token=[redacted]`);
+    expect(response.headers.get('x-echo')).toBe('Bearer [redacted]');
+  });
+
   it('keeps an instance path prefix', async () => {
     const { mock, client } = setup({ base: `${BASE}/glitchtip` });
     mock.json('GET', `${BASE}/glitchtip/api/0/x/`, []);
@@ -116,7 +196,16 @@ describe('raw()', () => {
     expect((await failure(client.raw(OP, 'GET', '/api/../../api/0/x/'))).kind).toBe('invalid');
   });
 
-  it.each(['Authorization', 'host', 'COOKIE'])('refuses a caller %s header', async (name) => {
+  it.each([
+    'Authorization',
+    'Proxy-Authorization',
+    'host',
+    'COOKIE',
+    'Forwarded',
+    'X-Forwarded-For',
+    'x-forwarded-host',
+    'X-Real-IP',
+  ])('refuses a caller %s header', async (name) => {
     const { mock, client } = setup();
     const error = await failure(client.raw(OP, 'GET', '/api/0/', { headers: { [name]: 'x' } }));
     expect(error.kind).toBe('invalid');

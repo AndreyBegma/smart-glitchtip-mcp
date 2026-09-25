@@ -249,35 +249,82 @@ HTTP layer and the in-memory MCP transport.
   `TypeError` from such a defect now gets the "GlitchTip returned a response
   this server did not expect" message. The spec accepted this. The error id
   and the logged stack still identify the defect.
-- **Cost of `applyJsonBudget` on a pathological input.** Each shrink step
-  serialises the value again. Measured with `bun` on this machine:
-  - a list of 5000 items (667 KB) at a budget of 20000: 2 ms;
-  - an object holding such a list: 3 ms;
-  - a 1.5 MB object made of 500 nested 3000-character strings: 1069 ms.
+- **Cost of `applyJsonBudget`.** The first version was quadratic: every step
+  re-serialised the value and cut one string. The gate review measured 1.8 s
+  for 330 × 3000-character strings and 74 s for 2000 × 3000.
 
-  The last figure is one step per string cut. The events views keep their own
-  bounded JSON, so no current tool reaches this shape.
+  The current version works in three steps:
+  1. It cuts every long string in one pass.
+  2. It computes pretty-print sizes once, exactly (`prettySize`, which is
+     tested against `JSON.stringify`).
+  3. It keeps the sizes up to date by delta along the path it changed, and
+     chooses the largest child from a lazy max-heap per container.
+
+  Measured with `bun` on this machine at a budget of 20000:
+
+  | Input | Before | After |
+  |---|---|---|
+  | `{extra: 330 × 3000}` (1 MB) | — | 4 ms |
+  | `{extra: 2000 × 3000}` (6 MB) | — | 20 ms |
+  | 500 nested 3000-character strings (1.5 MB) | 1069 ms | 6 ms |
+  | 2000 keys × 50-item arrays | 953 ms with a per-step sort | 28 ms |
+  | 5000-item list | — | 3 ms |
+
+  Two tests hold these bounds, each under 200 ms: a 6 MB nested object, and
+  600 sibling arrays.
 - **Agents that parse the JSON of events or issues must read inside the
   fence.** Called out in the PR.
 
-## 14. Follow-Up Work
+## 14. Gate review (PR #14 at 8348878), and what changed after it
 
-- **Stale comments in `src/toolsets/events/event.format.ts`.** The comments
-  on `eventJsonView` and `boundedJson` still say that JSON is "unfenced". AC6
-  limits this slot to the declaration lines, so the comments are left for
-  the events owner.
-- **Cheaper JSON budgeting.** If a toolset ever returns wide objects made of
-  many long strings, `applyJsonBudget` could cache node sizes or cut all
-  over-long strings in one pass.
+1. **`applyJsonBudget` was quadratic.** It is now linear; see §13.
+2. **Response headers reached the caller unscrubbed.** `page()` and `raw()`
+   now return a new `Headers` with every value passed through
+   `instance.redact`. This covers a `Location` or an echoed `Bearer`, and is
+   tested for both methods.
+3. **Invalid `raw()` input read as a malformed response.** `raw()` now checks
+   its input before any request is built, and refuses it as `invalid`:
+   - a method outside GET, HEAD, POST, PUT, PATCH and DELETE;
+   - a body on GET or HEAD;
+   - an invalid header name or value;
+   - a body that cannot be serialised as JSON.
+4. **`returned` could disagree with `items`.** A single item that shrinks to
+   nothing now gives `{ returned: 0, total }`, and `returned` always equals
+   `items.length`.
+5. **Top-level scalars were all or nothing.** Long top-level strings are cut,
+   and each top-level scalar that fits is kept.
+6. **`describe()` could overflow on a cyclic cause chain.** It now walks the
+   chain iteratively, stops at 5 causes, and detects cycles.
+7. **Fence counting could be fooled by look-alike tags.** It now matches only
+   the exact tags that `untrusted()` writes, in order. In `issues`:
+   - `get_issue` and `assign_issue` fence a project name that has no slug, and
+     the assignee name;
+   - the `list_issues` table shows only the project slug and `team:<slug>` or
+     `<type>:<id>`. Table cells are cut at 80 characters and would split a
+     fence.
+8. **Events.** The stale "unfenced" comments are updated:
+   - `boundedJson` measures the fenced, escaped form, so a payload just under
+     the budget gets `TRUNCATED_NOTICE` consistently;
+   - `renderEventDetailJson` is given the budget less the fence overhead.
+9. **`raw()` paths and headers.**
+   - Paths may not contain `%2F`, `%5C` or `%2E`, in any case.
+   - These request headers are reserved: `Proxy-Authorization`,
+     `Forwarded`, `X-Forwarded-*` and `X-Real-IP`.
+
+**Behaviour change, kept.** `page()` reports a 204 or an empty 200 on a list
+endpoint as `malformed`, where it used to return `[]`. This is tested.
+
+## 15. Follow-Up Work
+
 - **`bootHttp` has no registry injection.** It goes through
   `src/bootstrap.ts`, which is outside this slot's fence. No current test
   needs it.
 
-## 15. PR
+## 16. PR
 
 See the pull request that closes #13.
 
-## 16. Verifier Instructions
+## 17. Verifier Instructions
 
 **Changed files:** §5.
 
