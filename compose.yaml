@@ -1,0 +1,16 @@
+# Dev only: the MCP server with hot reload, pointed at an external GlitchTip
+# instance (D-14 — no GlitchTip service here). Copy .env.example to .env first.
+services:
+  mcp:
+    build:
+      context: .
+      target: dev
+    environment:
+      MCP_TRANSPORT: http
+    env_file:
+      - .env
+    ports:
+      - '127.0.0.1:8080:8080'
+    volumes:
+      - .:/app
+      - /app/node_modules
