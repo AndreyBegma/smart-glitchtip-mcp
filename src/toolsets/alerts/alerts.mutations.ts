@@ -8,7 +8,7 @@ import { InstanceResolver } from '../../glitchtip/instance.resolver';
 import { formatParam, mutation, organizationParam } from '../../mcp/tool-params';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
 import { alertCall } from './alert-errors';
-import { type Alert, alertChangedView, resultView } from './alerts.format';
+import { type Alert, alertChangedView, numberText, resultView } from './alerts.format';
 import {
   ALERT_UNTRUSTED_NOTE,
   alertIdParam,
@@ -150,7 +150,7 @@ export class AlertsMutations {
     );
     return this.output.render(
       args.format,
-      alertChangedView(`Created alert ${alert?.id ?? '?'} in ${args.project}.`, alert),
+      alertChangedView(`Created alert ${numberText(alert?.id)} in ${args.project}.`, alert),
     );
   }
 

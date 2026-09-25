@@ -4,6 +4,7 @@ import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
 import type { components } from '../../glitchtip/generated/schema';
 import type { Page } from '../../glitchtip/pagination';
+import { RECIPIENT_TYPES } from './alerts.params';
 
 export type Alert = components['schemas']['ProjectAlertSchema'];
 export type StoredRecipient = components['schemas']['AlertRecipientSchema'];
@@ -28,6 +29,16 @@ const UNPARSABLE = 'unparsable URL (masked)';
 export function flatten(text: string): string {
   const flat = sharedFlatten(text);
   return flat.length > FIELD_CAP ? `${flat.slice(0, FIELD_CAP - 1)}…` : flat;
+}
+
+/** An id or count as text: only a number renders; anything else is `?`. */
+export function numberText(value: unknown): string {
+  return typeof value === 'number' ? String(value) : '?';
+}
+
+/** An id or count for json: only a number passes; anything else is null. */
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' ? value : null;
 }
 
 /** A recipient URL as it may be shown: its origin, plus `/…` when it has more. */
@@ -80,7 +91,7 @@ function targetText(recipient: StoredRecipient): string {
 }
 
 function recipientLine(recipient: StoredRecipient, withTags: boolean): string {
-  const line = `  - recipient ${recipient.id ?? '?'}  ${typeOf(recipient)}  ${targetText(recipient)}`;
+  const line = `  - recipient ${numberText(recipient.id)}  ${typeOf(recipient)}  ${targetText(recipient)}`;
   const tags = tagsOf(recipient);
   return withTags && tags.length > 0 ? `${line}\n    tags: ${tags.join(', ')}` : line;
 }
@@ -88,7 +99,7 @@ function recipientLine(recipient: StoredRecipient, withTags: boolean): string {
 function recipientJson(recipient: StoredRecipient, withTags: boolean) {
   const type = typeOf(recipient);
   return {
-    id: recipient.id ?? null,
+    id: numberOrNull(recipient.id),
     recipientType: type,
     target: type === 'email' ? EMAIL_TARGET : maskUrl(recipient.url),
     ...(type === 'zulip' ? { zulip: zulipSettings(recipient.config) } : {}),
@@ -101,7 +112,7 @@ export function triggerText(alert: Alert): string {
   const parts: string[] = [];
   const { quantity, timespanMinutes } = alert;
   if (quantity != null || timespanMinutes != null) {
-    parts.push(`${quantity ?? '?'} events in ${timespanMinutes ?? '?'} minutes`);
+    parts.push(`${numberText(quantity)} events in ${numberText(timespanMinutes)} minutes`);
   }
   if (alert.uptime === true) parts.push('uptime failures');
   return parts.length > 0 ? parts.join('; ') : 'no trigger set';
@@ -114,7 +125,7 @@ function recipientsOf(alert: Alert): readonly StoredRecipient[] {
 function alertText(alert: Alert, withTags: boolean): string {
   const recipients = recipientsOf(alert);
   const header = keyValues([
-    ['alert', alert.id ?? '?'],
+    ['alert', numberText(alert.id)],
     ['name', typeof alert.name === 'string' && alert.name !== '' ? flatten(alert.name) : 'unnamed'],
     ['trigger', triggerText(alert)],
   ]);
@@ -127,11 +138,11 @@ function alertText(alert: Alert, withTags: boolean): string {
 
 function alertJson(alert: Alert, withTags: boolean) {
   return {
-    id: alert.id ?? null,
-    name: alert.name ?? null,
-    timespanMinutes: alert.timespanMinutes ?? null,
-    quantity: alert.quantity ?? null,
-    uptime: alert.uptime ?? null,
+    id: numberOrNull(alert.id),
+    name: typeof alert.name === 'string' ? alert.name : null,
+    timespanMinutes: numberOrNull(alert.timespanMinutes),
+    quantity: numberOrNull(alert.quantity),
+    uptime: typeof alert.uptime === 'boolean' ? alert.uptime : null,
     recipients: recipientsOf(alert).map((r) => recipientJson(r, withTags)),
   };
 }
@@ -178,6 +189,22 @@ export function alertChangedView(summary: string, alert: Alert | undefined, note
   };
 }
 
+const TEST_STATUSES: readonly string[] = ['sent', 'error', 'skipped'];
+
+/**
+ * A test result's type and status render unfenced, so only values this
+ * server knows pass; anything else is null (`?` in text).
+ */
+function knownType(value: unknown): string | null {
+  return typeof value === 'string' && (RECIPIENT_TYPES as readonly string[]).includes(value)
+    ? value
+    : null;
+}
+
+function knownStatus(value: unknown): string | null {
+  return typeof value === 'string' && TEST_STATUSES.includes(value) ? value : null;
+}
+
 /** Test-delivery results; `results` must already be scrubbed of secrets. */
 export function testResultsView(alertId: number, results: readonly TestResult[]): View {
   return {
@@ -185,8 +212,8 @@ export function testResultsView(alertId: number, results: readonly TestResult[])
     text: () => {
       if (results.length === 0) return `Alert ${alertId} has no matching recipients to test.`;
       const lines = results.map((r) => {
-        const type = typeof r.recipientType === 'string' ? flatten(r.recipientType) : '?';
-        const status = typeof r.status === 'string' ? flatten(r.status) : '?';
+        const type = knownType(r.recipientType) ?? '?';
+        const status = knownStatus(r.status) ?? '?';
         const message =
           typeof r.message === 'string' && r.message !== ''
             ? `  ${untrusted('test.message', flatten(r.message), 'external')}`
@@ -198,9 +225,9 @@ export function testResultsView(alertId: number, results: readonly TestResult[])
     json: () => ({
       alertId,
       results: results.map((r) => ({
-        recipientType: r.recipientType ?? null,
-        status: r.status ?? null,
-        message: r.message ?? null,
+        recipientType: knownType(r.recipientType),
+        status: knownStatus(r.status),
+        message: typeof r.message === 'string' ? r.message : null,
       })),
     }),
   };

@@ -51,8 +51,13 @@ result (`text` or `json`), an error message or a log line.
   secrets before it calls GlitchTip — from its input and from the alert it read
   first — and replaces each of them with `[redacted]` in GlitchTip's error
   message and detail and in every test-delivery message. The scrub list holds
-  each URL's full value, its path + query, its path and its host + path, plus
-  every Zulip key; forms shorter than 8 characters are not scrubbed.
+  each URL's full value, its path + query, its path and its host + path, their
+  percent-decoded forms, the path as written in the stored URL, its last path
+  segment (8 characters or more), plus every Zulip key (8 characters or more),
+  each also in its JSON-escaped form. URL-derived forms are kept whatever their
+  length (an ntfy topic `/s3cr3t` is the credential), except a bare `/`.
+  GlitchTip's error mapping cuts a long detail at 500 characters; a secret cut
+  off there (any trailing start of 6 characters or more) is redacted too.
 - **Untrusted data (D-18).** Masked recipient URLs are fenced as
   `glitchtip-config`, test-delivery messages as `external`, after being
   flattened to one line. Every description that returns them ends with:
@@ -81,9 +86,21 @@ GlitchTip's alert `PUT` replaces the whole alert: every recipient not in the
 body is deleted. `update_project_alert`, `add_alert_recipient` and
 `remove_alert_recipient` therefore read the alert first and re-send it whole —
 name, trigger, uptime flag and every recipient to keep as stored, a Zulip
-recipient's key included. A stored recipient this server cannot express (an
-unknown type, a missing URL, incomplete Zulip settings) makes the tool refuse
-before the `PUT` rather than delete it. The read and the write are not atomic:
+recipient's key included. The tool refuses before the `PUT`, rather than
+guess, when the alert as read cannot be re-sent unchanged:
+
+- the recipient list is missing or not a list (re-sending `[]` would delete
+  every recipient);
+- `name`, `timespanMinutes` or `quantity` is missing (only an explicit `null`
+  counts as cleared), or `uptime` is not a boolean;
+- a recipient has an unknown type, a missing or non-http(s) URL, tags that are
+  not strings, or Zulip settings that are incomplete, hold a key other than
+  `bot_email`, `api_key`, `channel`, `topic`, or a non-string topic (a missing
+  topic is re-sent as GlitchTip's default, "GlitchTip Alerts").
+
+`test_project_alert` shows a result's recipient type and status only when
+they are values this server knows (`sent`, `error`, `skipped`); anything else
+reads `?`. Ids and counts render only when GlitchTip sent a number. The read and the write are not atomic:
 a concurrent edit between them is lost.
 
 ## `list_project_alerts`

@@ -11,6 +11,7 @@ import { alertCall, alertNotFoundMessage } from './alert-errors';
 import {
   type Alert,
   alertChangedView,
+  numberText as idText,
   type StoredRecipient,
   type TestResult,
   testResultsView,
@@ -98,7 +99,7 @@ export class AlertRecipientsMutations {
     const duplicate = recipientsOf(alert).find((r) => recipientKey(r.recipientType, r.url) === key);
     if (duplicate) {
       return error(
-        `Not added: alert ${args.alert_id} already has this recipient (recipient ${duplicate.id ?? '?'}, ${args.recipient.type}).`,
+        `Not added: alert ${args.alert_id} already has this recipient (recipient ${idText(duplicate.id)}, ${args.recipient.type}).`,
       );
     }
     const allSecrets = mergeSecrets(secrets, inputSecrets(args.recipient));
@@ -116,7 +117,7 @@ export class AlertRecipientsMutations {
     return this.output.render(
       args.format,
       alertChangedView(
-        `Added recipient ${newId ?? '?'} (${args.recipient.type}) to alert ${args.alert_id}.`,
+        `Added recipient ${idText(newId)} (${args.recipient.type}) to alert ${args.alert_id}.`,
         updated,
       ),
     );
@@ -151,8 +152,7 @@ export class AlertRecipientsMutations {
     const index = stored.findIndex((r) => r?.id === args.recipient_id);
     if (index < 0) return error(notARecipient(args.recipient_id, args.alert_id));
     const scalars = storedScalars(alert, args.alert_id);
-    const others = { ...alert, alertRecipients: stored.filter((_, i) => i !== index) };
-    const kept = resendRecipients(others, args.alert_id);
+    const kept = resendRecipients(alert, args.alert_id, index);
     const updated = await writeAlert(glitchtip.client, target, scalars, kept, secrets);
     return this.output.render(
       args.format,

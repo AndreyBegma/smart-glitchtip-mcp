@@ -43,26 +43,34 @@ export interface AlertScalars {
   readonly uptime: boolean;
 }
 
-/** The stored alert's scalars; a field of the wrong type is a refusal, not a guess. */
+/**
+ * The stored alert's scalars. Each must be present: only an explicit `null`
+ * counts as cleared, because re-sending a missing field as `null` or `false`
+ * would silently change the alert. A missing field or one of the wrong type
+ * is a refusal, not a guess.
+ */
 export function storedScalars(alert: Alert, alertId: number): AlertScalars {
-  const { name, timespanMinutes, quantity, uptime } = alert;
-  const optional = (v: unknown, type: 'string' | 'number') =>
-    v === null || v === undefined || typeof v === type;
+  const { name, timespanMinutes, quantity, uptime } = alert as Partial<Alert>;
+  const present = (key: keyof Alert) => key in alert;
+  const nullable = (v: unknown, type: 'string' | 'number') => v === null || typeof v === type;
   if (
-    !optional(name, 'string') ||
-    !optional(timespanMinutes, 'number') ||
-    !optional(quantity, 'number') ||
-    !(uptime === undefined || typeof uptime === 'boolean')
+    !present('name') ||
+    !present('timespanMinutes') ||
+    !present('quantity') ||
+    !nullable(name, 'string') ||
+    !nullable(timespanMinutes, 'number') ||
+    !nullable(quantity, 'number') ||
+    typeof uptime !== 'boolean'
   ) {
     throw new AlertRefusal(
-      `Refused: alert ${alertId} as GlitchTip returned it has a field of an unexpected type, so it cannot be re-sent unchanged. No change was made.`,
+      `Refused: alert ${alertId} as GlitchTip returned it lacks name, timespanMinutes, quantity or uptime, or has one of an unexpected type, so it cannot be re-sent unchanged. No change was made.`,
     );
   }
   return {
     name: name ?? null,
     timespanMinutes: timespanMinutes ?? null,
     quantity: quantity ?? null,
-    uptime: uptime ?? false,
+    uptime,
   };
 }
 
@@ -80,14 +88,24 @@ export function assertWholeTrigger(scalars: AlertScalars): void {
  * `tagsToAdd`, and for Zulip `config.bot_email/api_key/channel/topic`
  * [Confirmed: `_prepare_recipient_data` stores them snake_case in `config`].
  * A recipient the input schema cannot express would be deleted by the PUT,
- * so the whole write is refused instead.
+ * so the whole write is refused instead — and so is a missing or null
+ * recipient list, which would re-send `[]` and delete them all.
+ *
+ * `exceptIndex` leaves out the one recipient a removal drops; it alone need
+ * not be expressible.
  */
-export function resendRecipients(alert: Alert, alertId: number): RecipientIn[] {
-  const stored: unknown = alert.alertRecipients ?? [];
+export function resendRecipients(
+  alert: Alert,
+  alertId: number,
+  exceptIndex?: number,
+): RecipientIn[] {
+  const stored: unknown = alert.alertRecipients;
   if (!Array.isArray(stored)) {
-    throw refusal(alertId, 'its recipient list', 'GlitchTip returned something other than a list');
+    throw refusal(alertId, 'its recipient list', 'GlitchTip returned no list of recipients');
   }
-  return stored.map((recipient) => resend(recipient, alertId));
+  return stored
+    .filter((_, index) => index !== exceptIndex)
+    .map((recipient) => resend(recipient, alertId));
 }
 
 function resend(value: unknown, alertId: number): RecipientIn {
@@ -117,21 +135,34 @@ function storedTags(tags: unknown, alertId: number, what: string): string[] | nu
   throw refusal(alertId, what, 'its tags are not a list of strings');
 }
 
+const ZULIP_CONFIG_KEYS = new Set(['bot_email', 'api_key', 'channel', 'topic']);
+
+/**
+ * A stored Zulip `config` mapped back to camelCase. A setting this server
+ * does not know would be lost by the re-send, so it is a refusal; a missing
+ * `topic` takes GlitchTip's own default, any other non-string is refused.
+ */
 function zulipConfig(config: unknown, alertId: number, what: string) {
-  const c = (typeof config === 'object' && config !== null ? config : {}) as Record<
-    string,
-    unknown
-  >;
+  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+    throw refusal(alertId, what, 'its Zulip settings are incomplete');
+  }
+  const c = config as Record<string, unknown>;
+  if (Object.keys(c).some((key) => !ZULIP_CONFIG_KEYS.has(key))) {
+    throw refusal(alertId, what, 'its Zulip settings hold a key this server cannot re-send');
+  }
   const { bot_email, api_key, channel, topic } = c;
   if (typeof bot_email !== 'string' || typeof api_key !== 'string' || typeof channel !== 'string') {
     throw refusal(alertId, what, 'its Zulip settings are incomplete');
+  }
+  if (topic !== undefined && topic !== null && typeof topic !== 'string') {
+    throw refusal(alertId, what, 'its Zulip topic is not a string');
   }
   return {
     recipientType: 'zulip' as const,
     botEmail: bot_email,
     apiKey: api_key,
     channel,
-    topic: typeof topic === 'string' ? topic : ZULIP_DEFAULT_TOPIC,
+    topic: topic ?? ZULIP_DEFAULT_TOPIC,
   };
 }
 
