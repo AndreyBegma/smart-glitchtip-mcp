@@ -4,6 +4,8 @@ import { loadConfig } from '../config/config';
 import { authGrantOf } from '../glitchtip/auth-grant';
 import { HttpAuthGuard } from './http-auth.guard';
 
+const SHARED = 'shared-secret-0123456';
+
 function context(authorization?: string) {
   const request = { headers: authorization === undefined ? {} : { authorization } };
   const responseHeaders: Record<string, string> = {};
@@ -24,20 +26,20 @@ describe('HttpAuthGuard', () => {
     'answers 401 with WWW-Authenticate for %j',
     (authorization) => {
       const { ctx, responseHeaders } = context(authorization);
-      expect(() => guard('shared').canActivate(ctx)).toThrow(UnauthorizedException);
+      expect(() => guard(SHARED).canActivate(ctx)).toThrow(UnauthorizedException);
       expect(responseHeaders['WWW-Authenticate']).toBe('Bearer');
     },
   );
 
   it('grants server mode for MCP_AUTH_TOKEN', () => {
-    const { ctx, request } = context('Bearer shared');
-    expect(guard('shared').canActivate(ctx)).toBe(true);
+    const { ctx, request } = context(`Bearer ${SHARED}`);
+    expect(guard(SHARED).canActivate(ctx)).toBe(true);
     expect(authGrantOf(request)).toEqual({ mode: 'server' });
   });
 
   it('treats any other bearer as a GlitchTip token to pass through', () => {
     const { ctx, request } = context('Bearer glitchtip-token');
-    guard('shared').canActivate(ctx);
+    guard(SHARED).canActivate(ctx);
     expect(authGrantOf(request)).toEqual({ mode: 'passthrough', token: 'glitchtip-token' });
   });
 
@@ -49,7 +51,7 @@ describe('HttpAuthGuard', () => {
 
   it('keeps the grant off the request object', () => {
     const { ctx, request } = context('Bearer glitchtip-token');
-    guard('shared').canActivate(ctx);
+    guard(SHARED).canActivate(ctx);
     expect(JSON.stringify(request)).not.toContain('passthrough');
   });
 });

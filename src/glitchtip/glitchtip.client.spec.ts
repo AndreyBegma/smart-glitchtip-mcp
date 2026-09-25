@@ -197,6 +197,41 @@ describe('GlitchTipClient', () => {
     );
   });
 
+  it('states a plain requirement on 403 for routes GlitchTip does not gate by scope', async () => {
+    const { mock, client } = setup();
+    mock.json('GET', `${BASE}/api/0/`, {}, { status: 403 });
+    const error = await failure(
+      client.call(
+        { name: 'read the API root', scopes: [], requirement: 'any valid token' },
+        (api) => api.GET('/api/0/'),
+      ),
+    );
+    expect(error.message).toBe(
+      'The token lacks permission for read the API root. It needs any valid token.',
+    );
+    expect(error.message).not.toContain('unknown');
+  });
+
+  it('never asks fetch to follow a redirect, and surfaces the 3xx instead', async () => {
+    const { mock, client } = setup();
+    mock.on(
+      'GET',
+      `${ORGS}acme/`,
+      new Response(null, { status: 301, headers: { location: 'https://evil.test/steal' } }),
+    );
+    const error = await failure(
+      client.call(GET_ORG, (api) =>
+        api.GET('/api/0/organizations/{organization_slug}/', {
+          params: { path: { organization_slug: 'acme' } },
+        }),
+      ),
+    );
+    expect(mock.requests.map((r) => r.redirect)).toEqual(['manual']);
+    expect(mock.followingRedirects).toEqual([]);
+    expect(mock.requests.map((r) => r.url.host)).toEqual(['glitchtip.test']);
+    expect(error.message).toContain('redirect (301)');
+  });
+
   it.each([
     [400, 'invalid', 'GlitchTip rejected the request: bad name'],
     [422, 'invalid', 'GlitchTip rejected the request: bad name'],

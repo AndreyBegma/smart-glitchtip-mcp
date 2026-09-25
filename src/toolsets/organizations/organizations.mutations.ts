@@ -61,7 +61,11 @@ export class OrganizationsMutations {
   ): Promise<CallToolResult> {
     const { client } = this.instances.connect(ctx.getRawRequest());
     const created = await client.call(
-      { name: 'create organization', scopes: ['superuser, or open organization creation'] },
+      {
+        name: 'create organization',
+        scopes: [],
+        requirement: 'superuser rights, or an instance that allows organization creation',
+      },
       (api) => api.POST('/api/0/organizations/', { body: { name: args.name } }),
     );
     return this.output.render(

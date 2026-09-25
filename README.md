@@ -83,7 +83,7 @@ value), and exit code 1.
 | `MCP_TRANSPORT` | `stdio` \| `http`, default `stdio` | transport |
 | `MCP_HTTP_PORT` | int, default `8080` | HTTP port |
 | `MCP_HTTP_PATH` | default `/mcp` | endpoint path |
-| `MCP_AUTH_TOKEN` | string, optional | shared secret for HTTP clients that do not bring their own GlitchTip token; required in HTTP mode when `GLITCHTIP_TOKEN` is set |
+| `MCP_AUTH_TOKEN` | string, optional; at least 16 characters, no whitespace | shared secret for HTTP clients that do not bring their own GlitchTip token; required in HTTP mode when `GLITCHTIP_TOKEN` is set |
 | `GLITCHTIP_URL` | URL, required in stdio; optional in http | default instance |
 | `GLITCHTIP_TOKEN` | string, optional | default token |
 | `GLITCHTIP_DEFAULT_ORG` | slug, optional | default organization |
@@ -92,7 +92,7 @@ value), and exit code 1.
 | `GLITCHTIP_READ_ONLY` | bool, default `true` | `false` registers the tools that change or delete data |
 | `GLITCHTIP_TIMEOUT_MS` | int, default `15000` | timeout of each request to GlitchTip |
 | `MCP_RESPONSE_BUDGET` | int chars, default `20000` | maximum size of a tool result; longer results are truncated and say so |
-| `LOG_LEVEL` | pino level, default `info` | log level (logs go to stderr) |
+| `LOG_LEVEL` | pino level, default `info` | log level (logs go to stderr; HTTP request lines carry method, path and a short list of harmless headers, never credentials) |
 
 Known toolsets: `organizations`, `issues`, `events`, `projects`, `teams`,
 `members`, `releases`, `alerts`, `monitors`, `status_pages`, `performance`,

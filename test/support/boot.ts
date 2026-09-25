@@ -6,11 +6,13 @@ import { McpStrategy } from '@rekog/mcp-nest';
 import { AppModule } from '../../src/app.module';
 import { startHttp } from '../../src/bootstrap';
 import { loadConfig } from '../../src/config/config';
+import type { LogLevel } from '../../src/config/config.schema';
 import { createLogger, nestLogger } from '../../src/logging/logger';
 import { serverOptions } from '../../src/mcp/transports';
 import { captureStream } from './capture-stream';
 import { InMemoryMcpTransport } from './in-memory-transport';
 import type { MockGlitchTip } from './mock-glitchtip';
+import { resetNestjsPino } from './reset-nestjs-pino';
 
 export const GLITCHTIP = 'https://glitchtip.test';
 
@@ -31,8 +33,7 @@ export async function bootInMemory(
   mock?: MockGlitchTip,
 ): Promise<Booted> {
   const config = loadConfig({ GLITCHTIP_URL: GLITCHTIP, LOG_LEVEL: 'debug', ...env });
-  const sink = captureStream();
-  const logger = createLogger({ level: config.logLevel, destination: sink.stream });
+  const { sink, logger } = await freshLogger(config.logLevel);
   const transport = new InMemoryMcpTransport();
   const strategy = new McpStrategy(serverOptions(config, [transport]));
   const moduleRef = await Test.createTestingModule({
@@ -73,8 +74,7 @@ export async function bootHttp(env: NodeJS.ProcessEnv, mock: MockGlitchTip): Pro
     LOG_LEVEL: 'debug',
     ...env,
   });
-  const sink = captureStream();
-  const logger = createLogger({ level: config.logLevel, destination: sink.stream });
+  const { sink, logger } = await freshLogger(config.logLevel);
   const app: INestApplication = await startHttp(config, logger, { fetch: mock.fetch });
   const { port } = app.getHttpServer().address() as AddressInfo;
   const baseUrl = new URL(`http://127.0.0.1:${port}`);
@@ -95,6 +95,17 @@ export async function bootHttp(env: NodeJS.ProcessEnv, mock: MockGlitchTip): Pro
       await app.close();
     },
   };
+}
+
+/**
+ * A logger writing into a sink owned by this boot alone. nestjs-pino's
+ * process-wide root is reset first; without that, every boot after the first
+ * in a file would log into the first boot's sink.
+ */
+async function freshLogger(level: LogLevel) {
+  await resetNestjsPino();
+  const sink = captureStream();
+  return { sink, logger: createLogger({ level, destination: sink.stream }) };
 }
 
 /** The concatenated text of a tool result. */

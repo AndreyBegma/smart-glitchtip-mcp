@@ -98,6 +98,19 @@ describe('read-only mode (acceptance 3)', () => {
   });
 });
 
+describe('read-only across every toolset', () => {
+  // Guards future toolsets: whatever a later PR adds to its index.ts, a
+  // read-only server with everything enabled lists read-only tools only.
+  it('with GLITCHTIP_TOOLSETS=all and read-only, every listed tool is readOnlyHint: true', async () => {
+    const tools = await toolsWith({ GLITCHTIP_TOOLSETS: 'all', GLITCHTIP_READ_ONLY: 'true' });
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(tool.annotations?.readOnlyHint, tool.name).toBe(true);
+      expect(tool.annotations?.destructiveHint, tool.name).not.toBe(true);
+    }
+  });
+});
+
 describe('toolset selection (acceptance 4)', () => {
   it('starts with a not-yet-available toolset, lists only whoami, and warns', async () => {
     const tools = await toolsWith({ GLITCHTIP_TOOLSETS: 'alerts', GLITCHTIP_READ_ONLY: 'false' });

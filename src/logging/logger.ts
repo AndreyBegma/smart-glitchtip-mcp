@@ -1,3 +1,4 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { LoggerService } from '@nestjs/common';
 import { Logger as NestPinoLogger, type Params, PinoLogger } from 'nestjs-pino';
 import pino, { type DestinationStream, type Logger } from 'pino';
@@ -5,12 +6,11 @@ import type { LogLevel } from '../config/config.schema';
 
 /**
  * Paths pino replaces with "[redacted]" before a line is written (D-09).
- * The client never logs request headers, so this is the second line of
- * defence, not the first.
+ * Request lines never carry the header map (see serializeRequest), so this is
+ * the second line of defence, not the first.
  */
 export const REDACT_PATHS = [
   'req.headers.authorization',
-  'req.headers["x-glitchtip-token"]',
   'token',
   '*.token',
   '*.GLITCHTIP_TOKEN',
@@ -18,6 +18,14 @@ export const REDACT_PATHS = [
   'headers.authorization',
   '*.headers.authorization',
 ];
+
+/** The only request headers a log line may carry; everything else is dropped. */
+const LOGGED_HEADERS = [
+  'content-type',
+  'content-length',
+  'user-agent',
+  'mcp-protocol-version',
+] as const;
 
 export interface LoggerOptions {
   readonly level: LogLevel;
@@ -48,6 +56,10 @@ export function pinoParams(logger: Logger): Params {
       logger,
       autoLogging: { ignore: (req) => req.url === '/healthz' },
       quietReqLogger: true,
+      // Allowlists, not the default serializers: the default logs every
+      // request header, including Authorization and X-GlitchTip-Url, which
+      // may carry credentials (AGENTS.md rule 1).
+      serializers: { req: serializeRequest, res: serializeResponse },
     },
   };
 }
@@ -56,6 +68,46 @@ export function pinoParams(logger: Logger): Params {
 export function nestLogger(logger: Logger): LoggerService {
   const params = pinoParams(logger);
   return new NestPinoLogger(new PinoLogger(params), params);
+}
+
+interface SerializedRequest {
+  readonly id?: unknown;
+  readonly method?: string;
+  readonly url?: string;
+  readonly headers?: Record<string, string | string[] | undefined>;
+  readonly raw?: IncomingMessage;
+}
+
+/** Method, path (no query string) and allowlisted headers; never credentials. */
+export function serializeRequest(req: SerializedRequest): object {
+  const headers = req.headers ?? req.raw?.headers ?? {};
+  const logged: Record<string, string> = {};
+  for (const name of LOGGED_HEADERS) {
+    const value = headers[name];
+    if (typeof value === 'string') logged[name] = value;
+  }
+  const instance = instanceOrigin(headers['x-glitchtip-url']);
+  if (instance) logged['x-glitchtip-url'] = instance;
+  return {
+    id: req.id,
+    method: req.method,
+    path: (req.url ?? '').split('?')[0],
+    headers: logged,
+  };
+}
+
+function serializeResponse(res: { statusCode?: number; raw?: ServerResponse }): object {
+  return { statusCode: res.statusCode ?? res.raw?.statusCode };
+}
+
+// Only the origin of a client-chosen instance: no userinfo, path or query.
+function instanceOrigin(value: string | string[] | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return '[unparseable]';
+  }
 }
 
 function stderrDestination(): DestinationStream {

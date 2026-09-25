@@ -11,7 +11,7 @@ const CLIENT_TOKEN = 'tok_CLIENT_SECRET';
 function httpConfig(extra: NodeJS.ProcessEnv = {}): AppConfig {
   return loadConfig({
     MCP_TRANSPORT: 'http',
-    MCP_AUTH_TOKEN: 'shared-secret',
+    MCP_AUTH_TOKEN: 'shared-secret-0123456',
     GLITCHTIP_URL: ENV_URL,
     GLITCHTIP_TOKEN: ENV_TOKEN,
     GLITCHTIP_ALLOWED_URLS: 'https://allowed.test, https://prefixed.test/glitchtip',
@@ -53,6 +53,17 @@ describe('InstanceResolver.resolve', () => {
     expect(instance.defaultOrg).toBe('acme');
   });
 
+  it('fails closed in http mode when no request is bound: never the env token', () => {
+    const resolver = new InstanceResolver(httpConfig());
+    for (const raw of [undefined, null]) {
+      expect(() => resolver.resolve(raw)).toThrow(
+        'No HTTP request is bound to this tool call in http mode.',
+      );
+      // Not agent-facing: it surfaces as an internal error with an id.
+      expect(() => resolver.resolve(raw)).not.toThrow(InstanceError);
+    }
+  });
+
   it('server grant → env instance and env token, org header wins over env', () => {
     const resolver = new InstanceResolver(httpConfig({ GLITCHTIP_DEFAULT_ORG: 'env-org' }));
     const instance = resolver.resolve(request(server, { 'x-glitchtip-org': 'hdr-org' }));
@@ -72,7 +83,11 @@ describe('InstanceResolver.resolve', () => {
 
   it('server grant without an env GlitchTip token is a tool error', () => {
     const resolver = new InstanceResolver(
-      loadConfig({ MCP_TRANSPORT: 'http', MCP_AUTH_TOKEN: 's', GLITCHTIP_URL: ENV_URL }),
+      loadConfig({
+        MCP_TRANSPORT: 'http',
+        MCP_AUTH_TOKEN: 'shared-secret-0123456',
+        GLITCHTIP_URL: ENV_URL,
+      }),
     );
     expect(resolveError(resolver, request(server)).message).toBe(
       'No GlitchTip token is configured on the server; send your own GlitchTip token as Bearer.',

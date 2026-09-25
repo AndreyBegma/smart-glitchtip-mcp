@@ -72,7 +72,11 @@ export const envSchema = z.object({
     .string()
     .regex(/^\/[A-Za-z0-9/_-]*$/, 'must be a path starting with /')
     .default('/mcp'),
-  MCP_AUTH_TOKEN: optionalString,
+  MCP_AUTH_TOKEN: z
+    .string()
+    .min(16, 'must be at least 16 characters')
+    .regex(/^\S+$/, 'must not contain whitespace')
+    .optional(),
   GLITCHTIP_URL: instanceUrl.optional(),
   GLITCHTIP_TOKEN: optionalString,
   GLITCHTIP_DEFAULT_ORG: z

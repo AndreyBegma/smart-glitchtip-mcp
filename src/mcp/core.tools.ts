@@ -43,8 +43,13 @@ export class CoreTools {
     @Ctx() ctx: McpContext,
   ): Promise<CallToolResult> {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
-    const root = await glitchtip.client.call({ name: 'read the API root', scopes: [] }, (api) =>
-      api.GET('/api/0/'),
+    const root = await glitchtip.client.call(
+      {
+        name: 'read the API root',
+        scopes: [],
+        requirement: 'no scope: any valid token (or none) may read it',
+      },
+      (api) => api.GET('/api/0/'),
     );
     const defaultOrganization = await describeDefaultOrganization(glitchtip);
     // Only fields listed here leave the server: APIRootSchema.auth also

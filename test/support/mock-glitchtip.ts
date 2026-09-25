@@ -5,6 +5,7 @@ export interface RecordedRequest {
   readonly url: URL;
   readonly headers: Headers;
   readonly body: string;
+  readonly redirect: Request['redirect'];
 }
 
 type Responder = (request: RecordedRequest) => Response | Promise<Response>;
@@ -14,6 +15,10 @@ type Responder = (request: RecordedRequest) => Response | Promise<Response>;
  * client's `fetch`. Routes match on method + full URL without the query
  * string; each route answers from a queue (the last answer repeats).
  * An unrouted request fails like a network error and is recorded.
+ *
+ * Every request must use `redirect: 'manual'`: a client that would follow a
+ * redirect could carry the bearer to another host, so the mock refuses it
+ * outright and the test fails loudly.
  */
 export class MockGlitchTip {
   readonly requests: RecordedRequest[] = [];
@@ -38,14 +43,22 @@ export class MockGlitchTip {
     return this.on(method, url, jsonResponse(body, init.status ?? 200, init.headers));
   }
 
+  /** Requests that asked fetch to follow redirects; must stay empty. */
+  readonly followingRedirects: RecordedRequest[] = [];
+
   readonly fetch: FetchLike = async (request) => {
     const recorded: RecordedRequest = {
       method: request.method,
       url: new URL(request.url),
       headers: new Headers(request.headers),
       body: request.body ? await request.text() : '',
+      redirect: request.redirect,
     };
     this.requests.push(recorded);
+    if (recorded.redirect !== 'manual') {
+      this.followingRedirects.push(recorded);
+      throw new Error(`mock GlitchTip: request uses redirect "${recorded.redirect}", not "manual"`);
+    }
     const queue = this.routes.get(routeKey(recorded.method, recorded.url));
     if (!queue || queue.length === 0) {
       this.unrouted.push(recorded);

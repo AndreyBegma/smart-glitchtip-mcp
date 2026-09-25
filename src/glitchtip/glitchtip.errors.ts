@@ -19,6 +19,11 @@ export interface Operation {
   readonly name: string;
   /** Token scopes any one of which GlitchTip accepts for this route. */
   readonly scopes: readonly string[];
+  /**
+   * For routes GlitchTip does not gate by scope: what it does need, in words
+   * (e.g. "superuser rights"). Replaces the scope list in a 403 message.
+   */
+  readonly requirement?: string;
   /** For 404s: what was looked up, e.g. "Organization". */
   readonly resource?: string;
   readonly id?: string | number;
@@ -106,9 +111,11 @@ export function malformedResponseError(): GlitchTipError {
   );
 }
 
-function forbiddenMessage(operation: Operation): string {
-  const scopes = operation.scopes.length > 0 ? operation.scopes.join(', ') : 'unknown';
-  return `The token lacks permission for ${operation.name}. It needs one of: ${scopes}.`;
+function forbiddenMessage({ name, scopes, requirement }: Operation): string {
+  const refused = `The token lacks permission for ${name}.`;
+  if (requirement) return `${refused} It needs ${requirement}.`;
+  if (scopes.length === 0) return `${refused} GlitchTip names no scope for it.`;
+  return `${refused} It needs one of: ${scopes.join(', ')}.`;
 }
 
 function notFoundMessage({ name, resource, id, org }: Operation): string {

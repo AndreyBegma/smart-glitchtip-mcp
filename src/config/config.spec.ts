@@ -69,9 +69,23 @@ describe('loadConfig', () => {
     expect(problemsOf({})).toContain('GLITCHTIP_URL: required when MCP_TRANSPORT is stdio');
   });
 
+  it('accepts a strong MCP_AUTH_TOKEN', () => {
+    const config = loadConfig({ MCP_TRANSPORT: 'http', MCP_AUTH_TOKEN: 'a'.repeat(16) });
+    expect(config.http.authToken).toHaveLength(16);
+  });
+
   it('refuses http with an env token and no MCP_AUTH_TOKEN', () => {
     const problems = problemsOf({ ...STDIO, MCP_TRANSPORT: 'http' });
     expect(problems.join('\n')).toMatch(/^MCP_AUTH_TOKEN: required/);
+  });
+
+  it.each([
+    ['short', 'must be at least 16 characters'],
+    ['has white space in it 0123', 'must not contain whitespace'],
+  ])('refuses a weak MCP_AUTH_TOKEN (%s) without echoing it', (secret, reason) => {
+    const problems = problemsOf({ MCP_TRANSPORT: 'http', MCP_AUTH_TOKEN: secret });
+    expect(problems).toEqual([`MCP_AUTH_TOKEN: ${reason}`]);
+    expect(problems.join('\n')).not.toContain(secret);
   });
 
   it('allows http without any URL or token (pure pass-through)', () => {
@@ -103,7 +117,7 @@ describe('configWarnings', () => {
   });
 
   it('warns about a server token with no env GlitchTip token', () => {
-    const config = loadConfig({ MCP_TRANSPORT: 'http', MCP_AUTH_TOKEN: 'shared' });
+    const config = loadConfig({ MCP_TRANSPORT: 'http', MCP_AUTH_TOKEN: 'shared-secret-0123456' });
     expect(configWarnings(config)).toEqual([
       expect.stringContaining('MCP_AUTH_TOKEN is set but GLITCHTIP_TOKEN is not'),
     ]);

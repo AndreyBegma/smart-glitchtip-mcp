@@ -97,6 +97,7 @@ describe('HTTP authentication (acceptance 5)', () => {
     server = await bootHttp(ENV, mockBoth());
     const client = await server.connect({ authorization: `Bearer ${CLIENT_TOKEN}` });
     await client.callTool({ name: 'list_organizations', arguments: {} });
+    expect(server.logs()).toContain('request completed');
     expect(server.logs()).not.toContain(CLIENT_TOKEN);
     expect(server.logs()).not.toContain(SERVER_SECRET);
   });

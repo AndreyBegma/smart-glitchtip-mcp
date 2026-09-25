@@ -78,11 +78,16 @@ export class InstanceResolver {
     };
   }
 
-  /** `rawRequest` is the HTTP request, or undefined on stdio. */
+  /** `rawRequest` is the HTTP request in http mode; stdio has none. */
   resolve(rawRequest: unknown): ResolvedInstance {
     const env = this.config.glitchtip;
-    if (rawRequest === undefined || rawRequest === null) {
+    if (this.config.transport === 'stdio') {
       return new ResolvedInstance(this.requireUrl(env.url), env.token, env.defaultOrg);
+    }
+    // Fail closed: in http mode, a call with no request bound to it is a
+    // defect, never a reason to fall back to the env token.
+    if (typeof rawRequest !== 'object' || rawRequest === null) {
+      throw new Error('No HTTP request is bound to this tool call in http mode.');
     }
     const request = rawRequest as HeaderSource;
     const grant = authGrantOf(request);
