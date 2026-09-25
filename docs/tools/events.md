@@ -19,10 +19,26 @@ Scopes are those GlitchTip 6.2.6 checks (`@has_permission` in
 
 Event content — titles, messages, stack frames, breadcrumbs, tags, request
 data, URLs — is submitted by anyone who holds a project's DSN (D-18). It is
-never followed as an instruction, whatever it contains. In the text output,
+never followed as an instruction, whatever it contains. In **text** output,
 each rendered section that carries event content is fenced as
 `<untrusted source="glitchtip-event" field="…">…</untrusted>`, with every `<`
-inside escaped so the payload cannot close the fence early.
+inside escaped so the payload cannot close the fence early; this includes
+`get_event_json`'s text output (`field="payload"`). **`json`** output is the
+projected/redacted object itself, unfenced, so `JSON.parse` of it always
+succeeds — fencing JSON output is the foundation's job (`BUG-20260925-006`),
+not this toolset's; watch for that landing on these tools too. Either way,
+if the result would still be too large for `MCP_RESPONSE_BUDGET` once
+capped (see below), `json` returns `{"truncated": true, "hint": "use path to
+select part of the event"}` (fenced, for `get_event_json`'s text) instead of
+a cut that would leave the JSON unparseable.
+
+Every event-supplied string is capped so one huge field can't by itself blow
+the budget: exception `type`/`value` (200/1000 characters), a shown frame's
+`filename`/`function`/`module` (300 characters), a breadcrumb's
+`category`/`message` (100/300 characters), the Message section (2000
+characters). Frames shown per exception are capped at 50 and the exception
+chain at 10 values, both regardless of budget; a single exception value
+still too large for the budget falls back to just its most recent frame.
 
 | Tool | GlitchTip endpoint | Read-only mode |
 |---|---|---|
@@ -86,17 +102,27 @@ the whole document.
 | `path` | JSON Pointer string | whole document |
 | `format` | `"text"` \| `"json"` | `text` |
 
-Before `path` is applied, the payload is redacted (D-20): `user.ip_address`
-and `user.geo` are removed; `request.cookies` becomes `"[redacted]"`; any
-`Authorization` or `Cookie` header in `request.headers` becomes `"[redacted]"`
-— whether `headers` is an array of `[key, value]` pairs or an object, header
-names compared case-insensitively. The same three redactions apply to the
-`Request` section rendered by `get_event`/`get_latest_event`/`get_project_event`
-when `include_request_headers: true`.
+Before `path` is applied, the payload is redacted (D-20): `user.ip_address`,
+`user.geo` and `user.client_ip` are removed; `request.cookies` becomes
+`"[redacted]"`; any header naming a secret (`Cookie`, `Set-Cookie`,
+`Authorization`, `Proxy-Authorization`, an API key or token — matched by
+`/cookie|authorization|token|api-?key|secret/i`) or the caller's real IP
+(`X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `CF-Connecting-IP`,
+`True-Client-IP`) becomes `"[redacted]"` in `request.headers`, whether that's
+an array of `[key, value]` pairs or an object, names compared
+case-insensitively; `request.env.REMOTE_ADDR` is removed. The same rules
+apply to the legacy `sentry.interfaces.User`/`sentry.interfaces.Http` keys,
+an `entries[]` entry of type `request`, and `contexts.*.client_ip`, wherever
+they appear in the payload. The `Request` section rendered by
+`get_event`/`get_latest_event`/`get_project_event` gets the same header
+redaction when `include_request_headers: true`.
 
 An invalid JSON Pointer, or one that matches nothing in the (already
 redacted) payload, is a tool error naming the first path segment it could not
-resolve; GlitchTip is not called a second time.
+resolve; GlitchTip is not called a second time. A payload shape this server
+doesn't recognise (an object where an array was expected, a `null` where a
+record was expected, and so on) degrades to an empty/omitted result rather
+than a tool error.
 
 ## `list_project_events`
 
@@ -159,8 +185,11 @@ Sections, each omitted when there is nothing to show:
 
 The whole result is bounded by `MCP_RESPONSE_BUDGET`. If it would still be
 too large once the header and the exception chain are in, sections 4, 6 and 7
-(breadcrumbs, then tags, then context) are dropped in that order before the
-foundation's character-count safety net runs.
+(breadcrumbs, then tags, then context) are dropped in that order; if it is
+*still* over budget (a pathological exception chain even after the caps
+above), any fence still open is closed before a final truncation marker —
+before the foundation's character-count safety net runs, so that net never
+has to cut an `<untrusted>` fence in half.
 
 ## Default organization
 

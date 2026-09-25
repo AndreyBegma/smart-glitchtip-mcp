@@ -14,7 +14,7 @@ type EventListItem = components['schemas']['IssueEventSchema'];
 type EventDetail = components['schemas']['IssueEventDetailSchema'];
 
 const TITLE_LIMIT = 120;
-/** What `fencedPayload` returns instead of a corrupt, mid-cut JSON string. */
+/** What a JSON result returns instead of a corrupt, mid-object tail cut. */
 const TRUNCATED_NOTICE = { truncated: true, hint: 'use path to select part of the event' };
 
 interface ListRow {
@@ -45,7 +45,7 @@ export function eventListView(
       return withCursor(lines.join('\n'), page.nextCursor);
     },
     json: () =>
-      fencedPayload(
+      boundedJson(
         {
           events: rows.map((row) => ({
             id: row.id,
@@ -100,29 +100,42 @@ export function eventDetailView(event: EventDetail, options: RenderOptions, budg
   const parsed = parseEvent(event);
   return {
     text: () => renderEventDetailText(parsed, options, budget),
-    json: () => fencedPayload(renderEventDetailJson(parsed, options), budget),
+    json: () => boundedJson(renderEventDetailJson(parsed, options), budget),
   };
 }
 
-/** `get_event_json`: the redacted raw payload (D-20), optionally narrowed by a JSON Pointer. */
+/**
+ * `get_event_json`: the redacted raw payload (D-20), optionally narrowed by
+ * a JSON Pointer. The `text` result is fenced (D-18); `format: "json"`
+ * returns the object itself, unfenced, so it parses cleanly — fencing JSON
+ * output is the foundation's job (BUG-20260925-006), not this toolset's.
+ */
 export function eventJsonView(raw: unknown, pointer: string | undefined, budget: number): View {
   const redacted = redactEventPayload(raw);
   const selected = pointer === undefined ? redacted : applyJsonPointer(redacted, pointer);
-  const fenced = fencedPayload(selected, budget);
-  return { text: () => fenced, json: () => fenced };
+  return {
+    text: () => boundedText(selected, budget),
+    json: () => boundedJson(selected, budget),
+  };
 }
 
-/**
- * Every JSON result — `get_event_json` and every tool's `format: "json"` —
- * is one `untrusted('payload', …)` fence around the pretty-printed JSON
- * (decision: reviewer, "Fencing (D-18)"). If the fenced text would still
- * blow the budget, a fixed, tiny, always-valid notice replaces it instead of
- * a mid-object tail cut that would leave the JSON unparseable.
- */
-function fencedPayload(data: unknown, budget: number): string {
+/** The fenced text form (D-18), degrading to a fenced notice rather than a mid-JSON tail cut. */
+function boundedText(data: unknown, budget: number): string {
   const full = untrusted('payload', JSON.stringify(data, null, 2));
   if (full.length <= budget) return full;
   return untrusted('payload', JSON.stringify(TRUNCATED_NOTICE, null, 2));
+}
+
+/**
+ * The `json` format: the object itself (never fenced — `ToolOutput`
+ * `JSON.stringify`s it, and a fence around that would only be valid once
+ * escaped, i.e. not really a fence). Degrades to a fixed, tiny, always-valid
+ * notice instead of a mid-object tail cut that would leave the JSON
+ * unparseable (spec AC7's "stack intact" concern, applied to JSON output).
+ */
+function boundedJson(data: unknown, budget: number): unknown {
+  const pretty = JSON.stringify(data, null, 2);
+  return pretty.length <= budget ? data : TRUNCATED_NOTICE;
 }
 
 function day(iso: string): string {

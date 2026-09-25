@@ -156,6 +156,22 @@ describe('get_latest_event', () => {
     expect(isError).toBe(true);
     expect(text).toBe('Issue 42 was not found in acme.');
   });
+
+  it('format: "json" returns the projected object directly, unfenced (review 6, final ruling)', async () => {
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/${ORG}/issues/42/events/latest/`,
+      EVENT_DETAIL,
+    );
+    const { text, isError } = await call(mock, 'get_latest_event', {
+      issue_id: 42,
+      format: 'json',
+    });
+    expect(isError).toBe(false);
+    expect(text).not.toContain('<untrusted');
+    const parsed = JSON.parse(text) as { header: { id: string } };
+    expect(parsed.header.id).toBe('evt-1');
+  });
 });
 
 describe('get_event', () => {
@@ -224,6 +240,28 @@ describe('get_event_json', () => {
     expect(text).not.toContain('Bearer x');
     expect(text).toContain('[redacted]');
     expect(text).toContain('a@b.test');
+  });
+
+  it('format: "json" returns the redacted object directly, unfenced (review 6, final ruling)', async () => {
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/${ORG}/issues/42/events/evt-1/json/`,
+      RAW,
+    );
+    const { text, isError } = await call(mock, 'get_event_json', {
+      issue_id: 42,
+      event_id: 'evt-1',
+      format: 'json',
+    });
+    expect(isError).toBe(false);
+    expect(text).not.toContain('<untrusted');
+    const parsed = JSON.parse(text) as {
+      user: Record<string, unknown>;
+      request: { cookies: unknown };
+    };
+    expect(typeof parsed).toBe('object');
+    expect(parsed.user.ip_address).toBeUndefined();
+    expect(parsed.request.cookies).toBe('[redacted]');
   });
 
   it('narrows the output with a JSON Pointer', async () => {
