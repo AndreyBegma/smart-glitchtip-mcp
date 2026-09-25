@@ -23,16 +23,16 @@ is `NO SPEC` and is not dispatchable. Tracking IDs are allocated by
 
 | ID | Title | Depends on | Spec | Gate | State |
 |---|---|---|---|---|---|
-| — | Scaffold: Nest + mcp-nest, config, GlitchTipClient from the snapshot, InstanceResolver, HTTP auth, toolset registry + read-only, stdio + HTTP, shared formatters, test harness, reference toolset `organizations` | — | — | token-safety, registration, ssrf | NO SPEC |
+| FEAT-20260925-001 | Scaffold: Nest + mcp-nest, config, GlitchTipClient from the snapshot, InstanceResolver, HTTP auth, toolset registry + read-only, stdio + HTTP, shared formatters, test harness, reference toolset `organizations` | — | [FEAT-20260925-001-foundation](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-001-foundation.md) | token-safety, registration, ssrf | READY |
 
-## Phase 1 — Core toolsets (three slots)
+## Phase 1 — Core toolsets and infrastructure (four rows, fleet ceiling three: the fourth dispatches on the first merge)
 
 | ID | Title | Depends on | Spec | Gate | State |
 |---|---|---|---|---|---|
-| — | Toolset `issues` (list/search/get/update/bulk/delete, comments, tags, hashes, user reports) | phase 0 | — | registration | NO SPEC |
-| — | Toolset `events` (issue events, latest, project events, event JSON) | phase 0 | — | — | NO SPEC |
-| — | Toolset `projects` (projects, keys/DSN, environments, project teams) | phase 0 | — | registration | NO SPEC |
-| — | Infrastructure: Dockerfile, compose for dev, Woodpecker pipelines, npm + ghcr publish on tag | phase 0 | — | token-safety | NO SPEC |
+| FEAT-20260925-002 | Toolset `issues` (list/search/get/update/bulk/delete, comments, tags, hashes, user reports) | phase 0 | [FEAT-20260925-002-issues-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-002-issues-toolset.md) | registration | BLOCKED — work (phase 0) |
+| FEAT-20260925-003 | Toolset `events` (issue events, latest, project events, event JSON) | phase 0 | [FEAT-20260925-003-events-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-003-events-toolset.md) | — | BLOCKED — work (phase 0) |
+| FEAT-20260925-004 | Toolset `projects` (projects, keys/DSN, environments, project teams) | phase 0 | [FEAT-20260925-004-projects-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-004-projects-toolset.md) | registration | BLOCKED — work (phase 0) |
+| FEAT-20260925-005 | Infrastructure: Dockerfile, compose for dev, Woodpecker pipelines, npm + ghcr publish on tag | phase 0 | [FEAT-20260925-005-infrastructure](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-005-infrastructure.md) | token-safety | BLOCKED — work (phase 0) |
 
 ## Phase 2 — Remaining toolsets (waves of three)
 
