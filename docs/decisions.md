@@ -270,3 +270,15 @@ account-takeover path reachable by prompt injection. A person does these in the
 GlitchTip UI.
 
 **Accepted cost.** "Full API coverage" has these named holes.
+
+## D-24 — Destructive tools: the target is required, the organization is not
+
+**Decision.** Every destructive tool requires its target (slug, id, version) and
+a `confirm` equal to it, checked before any request; `organization` stays
+optional with the D-11 default. The one exception is `delete_organization`,
+whose target *is* the organization, so there `organization` is required.
+
+**Why.** A wrong default organization makes the target lookup fail (404) or the
+server filter the ids out; it cannot redirect a confirmed target to a different
+object. Requiring `organization` everywhere doubles every destructive call for
+no protection the confirm does not already give.
