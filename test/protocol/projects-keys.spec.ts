@@ -52,7 +52,10 @@ async function call(mock: MockGlitchTip, name: string, args: Record<string, unkn
 describe('list_project_keys', () => {
   it('shows dsn.public and dsn.security, never a dsn.secret line', async () => {
     const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/keys/`, [KEY]);
-    const { text } = await call(mock, 'list_project_keys', { organization: 'acme', project: 'web' });
+    const { text } = await call(mock, 'list_project_keys', {
+      organization: 'acme',
+      project: 'web',
+    });
     expect(text).toContain('dsn.public: https://public@glitchtip.test/1');
     expect(text).toContain('dsn.security: https://glitchtip.test/api/1/security/');
     expect(text).not.toContain('dsn.secret');
@@ -87,11 +90,7 @@ describe('list_project_keys', () => {
 
 describe('get_project_key', () => {
   it('shows the key detail', async () => {
-    const mock = new MockGlitchTip().json(
-      'GET',
-      `${API}/projects/acme/web/keys/${KEY_ID}/`,
-      KEY,
-    );
+    const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, KEY);
     const { text } = await call(mock, 'get_project_key', {
       organization: 'acme',
       project: 'web',
@@ -139,8 +138,16 @@ describe('create_project_key', () => {
   });
 
   it('maps 403 to the write scopes', async () => {
-    const mock = new MockGlitchTip().json('POST', `${API}/projects/acme/web/keys/`, {}, { status: 403 });
-    const { text } = await call(mock, 'create_project_key', { organization: 'acme', project: 'web' });
+    const mock = new MockGlitchTip().json(
+      'POST',
+      `${API}/projects/acme/web/keys/`,
+      {},
+      { status: 403 },
+    );
+    const { text } = await call(mock, 'create_project_key', {
+      organization: 'acme',
+      project: 'web',
+    });
     expect(text).toContain('It needs one of: project:write, project:admin.');
   });
 });
@@ -178,12 +185,9 @@ describe('update_project_key', () => {
   });
 
   it('maps 403 to the write scopes', async () => {
-    const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, KEY).json(
-      'PUT',
-      `${API}/projects/acme/web/keys/${KEY_ID}/`,
-      {},
-      { status: 403 },
-    );
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, KEY)
+      .json('PUT', `${API}/projects/acme/web/keys/${KEY_ID}/`, {}, { status: 403 });
     const { text } = await call(mock, 'update_project_key', {
       organization: 'acme',
       project: 'web',

@@ -42,11 +42,10 @@ async function call(mock: MockGlitchTip, name: string, args: Record<string, unkn
 
 describe('set_project_environment_visibility', () => {
   it('puts name and isHidden', async () => {
-    const mock = new MockGlitchTip().json(
-      'PUT',
-      `${API}/projects/acme/web/environments/staging/`,
-      { name: 'staging', isHidden: true },
-    );
+    const mock = new MockGlitchTip().json('PUT', `${API}/projects/acme/web/environments/staging/`, {
+      name: 'staging',
+      isHidden: true,
+    });
     const { text } = await call(mock, 'set_project_environment_visibility', {
       organization: 'acme',
       project: 'web',

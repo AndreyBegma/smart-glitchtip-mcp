@@ -75,7 +75,10 @@ describe('read-only mode, pinned to GLITCHTIP_TOOLSETS=projects', () => {
       'whoami',
     ]);
     for (const tool of tools) {
-      expect(tool.annotations, tool.name).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+      expect(tool.annotations, tool.name).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+      });
     }
     await expect(
       booted.client.callTool({
@@ -258,14 +261,20 @@ describe('list_project_teams', () => {
     const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/teams/`, [
       { id: '1', slug: 'core', memberCount: 3 },
     ]);
-    const { text } = await call(mock, 'list_project_teams', { organization: 'acme', project: 'web' });
+    const { text } = await call(mock, 'list_project_teams', {
+      organization: 'acme',
+      project: 'web',
+    });
     expect(text).toContain('core');
     expect(text).toContain('3');
   });
 
   it('says so when there are none', async () => {
     const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/teams/`, []);
-    const { text } = await call(mock, 'list_project_teams', { organization: 'acme', project: 'web' });
+    const { text } = await call(mock, 'list_project_teams', {
+      organization: 'acme',
+      project: 'web',
+    });
     expect(text).toBe('No teams attached to project web.');
   });
 });

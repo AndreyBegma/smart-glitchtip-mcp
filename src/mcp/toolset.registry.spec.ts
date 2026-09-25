@@ -17,8 +17,23 @@ describe('toolset registry (acceptance 15)', () => {
     expect(dirs).toEqual([...TOOLSET_NAMES].sort());
   });
 
-  it('only organizations is available in the foundation', () => {
-    expect(TOOLSETS.filter((t) => t.available).map((t) => t.name)).toEqual(['organizations']);
+  it('organizations is available', () => {
+    expect(TOOLSETS.find((t) => t.name === 'organizations')?.available).toBe(true);
+  });
+
+  it('every available toolset contributes at least one read tool', () => {
+    for (const toolset of TOOLSETS) {
+      if (toolset.available) expect(toolset.read.length, toolset.name).toBeGreaterThan(0);
+    }
+  });
+
+  it('every not-yet-available toolset contributes no controllers', () => {
+    for (const toolset of TOOLSETS) {
+      if (!toolset.available) {
+        expect(toolset.read, toolset.name).toEqual([]);
+        expect(toolset.write, toolset.name).toEqual([]);
+      }
+    }
   });
 
   it('never selects write controllers in read-only mode', () => {

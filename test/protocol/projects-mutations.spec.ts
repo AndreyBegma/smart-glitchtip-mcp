@@ -94,7 +94,12 @@ describe('create_project', () => {
   });
 
   it('maps 403 to the write scopes', async () => {
-    const mock = new MockGlitchTip().json('POST', `${API}/teams/acme/core/projects/`, {}, { status: 403 });
+    const mock = new MockGlitchTip().json(
+      'POST',
+      `${API}/teams/acme/core/projects/`,
+      {},
+      { status: 403 },
+    );
     const { text } = await call(mock, 'create_project', {
       organization: 'acme',
       team: 'core',
@@ -177,7 +182,12 @@ describe('delete_project', () => {
   });
 
   it('maps 403 to project:admin', async () => {
-    const mock = new MockGlitchTip().json('DELETE', `${API}/projects/acme/web/`, {}, { status: 403 });
+    const mock = new MockGlitchTip().json(
+      'DELETE',
+      `${API}/projects/acme/web/`,
+      {},
+      { status: 403 },
+    );
     const { text } = await call(mock, 'delete_project', {
       organization: 'acme',
       project: 'web',
