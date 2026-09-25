@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { RULES } from '../../src/prompts/prompt-text';
 import { type Booted, bootInMemory } from '../support/boot';
 import { MockGlitchTip } from '../support/mock-glitchtip';
 
@@ -59,8 +60,7 @@ describe('prompts/get triage-issue (acceptance 3)', () => {
     expect(text).toContain(
       "No organization was given: the tools use the server's default organization.",
     );
-    expect(text).toContain('Rules for this task:');
-    expect(text).toContain('<untrusted …> … </untrusted>');
+    expect(text.endsWith(RULES)).toBe(true);
   });
 
   it('carries "organization":"acme" in every step when given', async () => {
@@ -107,6 +107,7 @@ describe('prompts/get release-health-report (acceptance 4)', () => {
     expect(commitsLine).not.toContain('project');
     expect(text).toContain('7. For up to 5 issues from step 5');
     expect(text).not.toContain('This version contains whitespace');
+    expect(text.endsWith(RULES)).toBe(true);
   });
 
   it('uses the whitespace variant for a version with a space, with no step 7', async () => {
@@ -126,11 +127,7 @@ describe('prompts/get release-health-report (acceptance 4)', () => {
       .messages[0].content.text;
     expect(text).toContain('"a\\"b\\u003cc\\u003e"');
     expect(text).toContain('"query":"release:a\\"b\\u003cc\\u003e"');
-    const argumentAngleBrackets = text
-      .split('\n')
-      .filter((line) => !line.includes('<untrusted') && !line.includes('</untrusted'))
-      .join('\n');
-    expect(argumentAngleBrackets).not.toMatch(/[<>]/);
+    expect(text.replace(RULES, '')).not.toMatch(/[<>]/);
     expect(JSON.parse(`"${text.match(/"a\\"b\\u003cc\\u003e"/)?.[0].slice(1, -1)}"`)).toBe(
       'a"b<c>',
     );

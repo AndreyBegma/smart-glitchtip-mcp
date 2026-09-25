@@ -77,7 +77,7 @@ function releaseHealthReportText(
         'get_issue for at most 5 of the largest of them and keep those whose firstRelease or ' +
         'lastRelease is this version. Say in the report that the issue list for this release is ' +
         'a sample.',
-      '5. get_issues_stats with "issue_ids" set to the ids of the kept issues, ' +
+      '5. get_issues_stats with "issue_ids" set to the ids of the kept issues, if any were kept, ' +
         `"period":"24h"${suffix}: whether they are rising or falling.`,
     );
   } else {

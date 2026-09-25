@@ -54,7 +54,11 @@ describe('tool coverage (acceptance 6)', () => {
   });
 
   it('every word in release-health-report matching a real tool name is in RELEASE_HEALTH_TOOLS', async () => {
-    const text = await textOf('release-health-report', { version: '1.0.0', organization: 'acme' });
+    const normal = await textOf('release-health-report', {
+      version: '1.0.0',
+      organization: 'acme',
+    });
+    const whitespace = await textOf('release-health-report', { version: '1.0 beta' });
     const server = await bootInMemory(
       {
         GLITCHTIP_TOKEN: 'tok',
@@ -66,7 +70,7 @@ describe('tool coverage (acceptance 6)', () => {
     );
     const toolNames = new Set((await server.client.listTools()).tools.map((t) => t.name));
     await server.close();
-    for (const word of new Set(wordsOf(text))) {
+    for (const word of new Set([...wordsOf(normal), ...wordsOf(whitespace)])) {
       if (toolNames.has(word)) expect(RELEASE_HEALTH_TOOLS, word).toContain(word);
     }
   });

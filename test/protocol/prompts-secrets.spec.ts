@@ -86,8 +86,15 @@ describe('secrets never reach a prompt response or the log (acceptance 9)', () =
       method: 'prompts/get',
       params: { name: 'release-health-report', arguments: { version: '1.0.0' } },
     })) as GetPromptResult;
+    const invalid = await booted.client
+      .request({
+        method: 'prompts/get',
+        params: { name: 'triage-issue', arguments: { issue_id: 'not-a-number' } },
+      })
+      .catch((error: unknown) => error);
+    expect(invalid).toMatchObject({ code: -32602 });
 
-    const serialised = JSON.stringify([list, triage, release]);
+    const serialised = JSON.stringify([list, triage, release, invalid]);
     const logs = booted.logs();
     for (const secret of [TOKEN, AUTH_TOKEN, URL_SENTINEL, DEFAULT_ORG]) {
       expect(serialised).not.toContain(secret);

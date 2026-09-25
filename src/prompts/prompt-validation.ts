@@ -15,9 +15,28 @@ export function validatePromptArgs<Shape extends z.ZodRawShape>(
   const result = schema.safeParse(args ?? {});
   if (result.success) return result.data;
   const issue = result.error.issues[0];
-  const argument = String(issue.path[0] ?? 'arguments');
+  const argument = issue.path[0] === undefined ? 'arguments' : String(issue.path[0]);
+  const detail = missingRequiredArg(issue)
+    ? 'is required'
+    : withoutLeadingArgument(issue.message, argument);
   throw new RpcException({
     code: -32602,
-    message: `Invalid arguments for prompt ${name}: ${argument} ${issue.message}.`,
+    message: `Invalid arguments for prompt ${name}: ${argument} ${detail}.`,
   });
+}
+
+/** A required string field that got no value at all: zod's own message names no argument. */
+function missingRequiredArg(issue: z.ZodIssue): boolean {
+  return issue.code === 'invalid_type' && issue.input === undefined;
+}
+
+/**
+ * `pathSegmentParam`'s own messages already name the argument (`"version
+ * must not be empty"`), since the toolsets reuse them directly in their own
+ * errors; strip that leading repeat so the prompt's own `<argument> ` prefix
+ * is not doubled (`"version version must not be empty"`).
+ */
+function withoutLeadingArgument(message: string, argument: string): string {
+  const prefix = `${argument} `;
+  return message.startsWith(prefix) ? message.slice(prefix.length) : message;
 }
