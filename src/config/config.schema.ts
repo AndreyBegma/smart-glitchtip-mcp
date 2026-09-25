@@ -118,6 +118,7 @@ export const envSchema = z.object({
   GLITCHTIP_UPLOAD_ROOT: uploadRoot.optional(),
   GLITCHTIP_UPLOAD_MAX_BYTES: integer(1, MAX_UPLOAD_MAX_BYTES).default(DEFAULT_UPLOAD_MAX_BYTES),
   GLITCHTIP_READ_ONLY: boolean.default(true),
+  GLITCHTIP_API_REQUEST_ALLOW_WRITE: boolean.default(false),
   GLITCHTIP_TIMEOUT_MS: integer(100, 600_000).default(15_000),
   MCP_RESPONSE_BUDGET: integer(1_000, 10_000_000).default(20_000),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),

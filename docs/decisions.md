@@ -282,3 +282,62 @@ whose target *is* the organization, so there `organization` is required.
 server filter the ids out; it cannot redirect a confirmed target to a different
 object. Requiring `organization` everywhere doubles every destructive call for
 no protection the confirm does not already give.
+
+## D-25 — `set_owner` is on the api_request denylist (amends D-23)
+
+**Decision.** `POST organizations/*/members/*/set_owner` is denied in
+`api_request` for every method. Ownership transfer stays reachable only through
+the members toolset's explicit, confirmed `transfer_organization_ownership`.
+
+**Why.** The same takeover-by-prompt-injection argument as D-23, and an
+explicit tool already exists — the escape hatch must not be a back door around
+its confirm.
+
+## D-26 — Resource URIs nest events under their issue, and take the
+organization as a query (amends D-17).
+**Decision.** The resource templates are `glitchtip://issues/{issue_id}{?organization}`
+and `glitchtip://issues/{issue_id}/events/{event_id}{?organization}`, where
+`event_id` is an event id or the literal `latest`. D-17's
+`glitchtip://events/{id}` is not built. Each template is registered when
+its toolset (`issues`, `events`) is enabled; `resources/list` stays empty.
+**Why.** GlitchTip has no route that reads an event by id alone: every
+event detail route is under an issue or a project [Confirmed: snapshot
+paths]. The issue is the agent's natural handle (it is what `list_issues`
+and `list_issue_events` return). A query parameter keeps D-17's literal
+path, keeps one template per resource, and mirrors the tools' optional
+`organization` (D-11).
+**Rejected.** `glitchtip://events/{id}` — unresolvable without a search.
+`glitchtip://{org}/issues/{id}` — puts a slug where the URI authority is,
+doubles the template count, and makes an organization named `issues`
+ambiguous to a reader. A separate `…/events/latest` template — the matcher
+takes the first template that matches, so two templates over one shape
+would make routing depend on registration order. A project-scoped event
+template (`glitchtip://projects/{project}/events/{event_id}`) — a later row
+if asked for.
+**Accepted cost.** One resource has two URIs (with and without
+`?organization`); a client that caches by URI may hold both.
+
+## D-27 — Prompts instruct, they do not fetch; they are listed only with
+their toolsets.
+**Decision.** A prompt's `prompts/get` result is a fixed instruction text
+plus its validated arguments, rendered as JSON literals. It makes no
+GlitchTip call and embeds no GlitchTip content. A prompt is registered only
+when every toolset it names is enabled and available; read-only mode does
+not affect it, because its text names read-only tools only and tells the
+agent to change nothing.
+**Why.** A `prompts/get` result enters the conversation as a *user*
+message. DSN-submitted text placed there would carry the user's authority —
+the strongest injection position there is (D-18). Tool results are where the
+fences and the untrusted-data sentences already live. Not fetching also
+means no token use, no budget and no partial failure at `prompts/get`, which
+clients call just to preview a prompt. Listing only with the toolsets
+follows D-07: an entry the agent cannot act on is not offered.
+**Rejected.** Pre-fetched prompts (issue, latest event, tags embedded as
+text or embedded resources) — they would need fencing and a budget split
+across several sources inside a user message, would fail half-way on one
+403, and would freeze options (`include_context`, `path`) the agent can
+choose itself. Always-listed prompts that tell the agent to enable a
+toolset — the agent cannot enable one.
+**Accepted cost.** A run costs the agent five to eight tool calls, and a
+model may deviate from the steps. `release-health-report` is absent by
+default, because `releases` is default-off (D-06).

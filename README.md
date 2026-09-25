@@ -111,6 +111,13 @@ never retried.
 
 - [`organizations`](docs/tools/organizations.md)
 
+## Prompts
+
+Two MCP prompts guide an agent through a read-only task with the tools above,
+documented in [`docs/tools/prompts.md`](docs/tools/prompts.md): `triage-issue`
+and `release-health-report`. Each is listed only when every toolset its steps
+use is enabled and available.
+
 ## Development
 
 ```sh

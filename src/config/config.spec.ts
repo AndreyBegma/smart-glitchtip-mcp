@@ -55,6 +55,19 @@ describe('loadConfig', () => {
     );
   });
 
+  it('parses GLITCHTIP_API_REQUEST_ALLOW_WRITE like read-only, default false', () => {
+    expect(loadConfig(STDIO).apiRequestAllowWrite).toBe(false);
+    expect(
+      loadConfig({ ...STDIO, GLITCHTIP_API_REQUEST_ALLOW_WRITE: 'TRUE' }).apiRequestAllowWrite,
+    ).toBe(true);
+    expect(
+      loadConfig({ ...STDIO, GLITCHTIP_API_REQUEST_ALLOW_WRITE: '0' }).apiRequestAllowWrite,
+    ).toBe(false);
+    expect(problemsOf({ ...STDIO, GLITCHTIP_API_REQUEST_ALLOW_WRITE: 'maybe' })).toEqual([
+      expect.stringMatching(/^GLITCHTIP_API_REQUEST_ALLOW_WRITE: /),
+    ]);
+  });
+
   it('expands toolsets=all (uploads needs an upload root, see below)', () => {
     expect(loadConfig({ ...STDIO, GLITCHTIP_TOOLSETS: 'all' }).toolsets).toEqual(
       TOOLSET_NAMES.filter((name) => name !== 'uploads'),
@@ -253,6 +266,30 @@ describe('uploads (D-22)', () => {
   it('does not warn about uploads when the toolsets are the defaults', () => {
     const config = loadConfig({ ...HTTP, MCP_AUTH_TOKEN: 'a'.repeat(16), GLITCHTIP_TOKEN: 't' });
     expect(configWarnings(config)).toEqual([]);
+  });
+});
+
+describe('GLITCHTIP_API_REQUEST_ALLOW_WRITE warnings (FEAT-20260925-015)', () => {
+  const allow = { ...STDIO, GLITCHTIP_API_REQUEST_ALLOW_WRITE: 'true' };
+
+  it('warns that the flag has no effect while read-only', () => {
+    const config = loadConfig({ ...allow, GLITCHTIP_TOOLSETS: 'api_request' });
+    expect(configWarnings(config)).toEqual([
+      expect.stringContaining('GLITCHTIP_API_REQUEST_ALLOW_WRITE has no effect while read-only'),
+    ]);
+  });
+
+  it('warns that the flag has no effect while the toolset is disabled', () => {
+    const config = loadConfig({ ...allow, GLITCHTIP_READ_ONLY: 'false' });
+    expect(configWarnings(config)).toEqual([
+      expect.stringContaining('api_request toolset is not enabled'),
+    ]);
+  });
+
+  it('does not warn when the flag takes effect, or is off', () => {
+    const on = { ...allow, GLITCHTIP_READ_ONLY: 'false', GLITCHTIP_TOOLSETS: 'api_request' };
+    expect(configWarnings(loadConfig(on))).toEqual([]);
+    expect(configWarnings(loadConfig({ ...STDIO, GLITCHTIP_TOOLSETS: 'api_request' }))).toEqual([]);
   });
 });
 

@@ -24,7 +24,10 @@ export function pathSegmentGuard(instanceUrl: string): Middleware {
   };
 }
 
-export type RawQuery = Readonly<Record<string, string | number | boolean | undefined>>;
+/** A raw call's query; an array value repeats the parameter once per item. */
+export type RawQuery = Readonly<
+  Record<string, string | number | boolean | readonly (string | number)[] | undefined>
+>;
 
 /**
  * The URL of a raw call: `path` below the instance URL, which must stay on
@@ -57,7 +60,9 @@ export function rawRequestUrl(
   }
   url.hash = '';
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined) url.searchParams.append(key, String(value));
+    if (value === undefined) continue;
+    const items = Array.isArray(value) ? value : [value];
+    for (const item of items) url.searchParams.append(key, String(item));
   }
   return url;
 }
@@ -71,6 +76,10 @@ const RESERVED_HEADERS = new Set([
   'cookie',
   'forwarded',
   'x-real-ip',
+  // Path overrides some proxies honour: they would route the request to a
+  // path the URL guard never saw.
+  'x-original-url',
+  'x-rewrite-url',
 ]);
 
 /**
@@ -82,7 +91,7 @@ export function assertCallerHeaders(headers: Readonly<Record<string, string>>): 
     const lower = name.toLowerCase();
     if (RESERVED_HEADERS.has(lower) || lower.startsWith('x-forwarded-')) {
       throw refusedRequestError(
-        'Headers may not set Authorization, Proxy-Authorization, Host, Cookie, Forwarded, X-Forwarded-* or X-Real-IP.',
+        'Headers may not set Authorization, Proxy-Authorization, Host, Cookie, Forwarded, X-Forwarded-*, X-Real-IP, X-Original-URL or X-Rewrite-URL.',
       );
     }
   }
