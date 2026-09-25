@@ -1,5 +1,6 @@
 import type { ToolAnnotations } from '@rekog/mcp-nest';
 import { z } from 'zod';
+import { HIGH_INVISIBLE_AND_BIDI_CLASS, LINE_PARAGRAPH_CLASS } from '../format/sanitize';
 
 // Argument schemas shared by every toolset, so the same argument reads the
 // same way in every tool (D-10: names and schemas are a public contract).
@@ -38,10 +39,17 @@ export const cursorParam = z
 /**
  * Free-form input a tool puts into a URL path (a release version, a name):
  * exactly one path segment. Refuses `.`, `..` and all-dot values, which URL
- * normalisation would collapse into another route, and `/`, `\`, `%` and
- * control characters. Slug inputs keep the slug regex, which already
- * excludes all of these. Every toolset refuses such values the same way.
+ * normalisation would collapse into another route; `/`, `\`, `%`; C0/C1
+ * controls and DEL; and the zero-width, bidi-override and line/paragraph
+ * separator characters `neutralise` also strips (BUG-20260925-016), so a
+ * segment can't hide or reorder itself in a transcript. Slug inputs keep the
+ * slug regex, which already excludes all of these. Every toolset refuses
+ * such values the same way.
  */
+const PATH_SEGMENT_REJECT = new RegExp(
+  `[/\\\\%\u0000-\u001f${HIGH_INVISIBLE_AND_BIDI_CLASS}${LINE_PARAGRAPH_CLASS}]`,
+);
+
 export function pathSegmentParam(label: string, maxLength: number) {
   return z
     .string()
@@ -49,9 +57,8 @@ export function pathSegmentParam(label: string, maxLength: number) {
     .max(maxLength, `${label} must be at most ${maxLength} characters`)
     .refine((value) => !/^\.+$/.test(value), `${label} must not be "." or ".." or only dots`)
     .refine(
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
-      (value) => !/[/\\%\u0000-\u001f\u007f]/.test(value),
-      `${label} must not contain /, \\, % or control characters`,
+      (value) => !PATH_SEGMENT_REJECT.test(value),
+      `${label} must not contain /, \\, %, control characters, or bidi/invisible characters`,
     );
 }
 
