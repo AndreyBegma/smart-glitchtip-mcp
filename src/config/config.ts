@@ -94,12 +94,18 @@ export function configWarnings(config: AppConfig): string[] {
       'MCP_AUTH_TOKEN is set but GLITCHTIP_TOKEN is not: clients using MCP_AUTH_TOKEN get a tool error; clients must send their own GlitchTip token.',
     );
   }
-  if (config.toolsetsMode === 'all' && !config.toolsets.includes('uploads')) {
-    warnings.push(
-      transport === 'http'
-        ? 'GLITCHTIP_TOOLSETS=all leaves out the uploads toolset: it reads local files and is available in stdio mode only (D-06).'
-        : 'GLITCHTIP_TOOLSETS=all leaves out the uploads toolset: GLITCHTIP_UPLOAD_ROOT is not set.',
-    );
+  if (!config.toolsets.includes('uploads')) {
+    if (config.toolsetsMode === 'all') {
+      warnings.push(
+        transport === 'http'
+          ? 'GLITCHTIP_TOOLSETS=all leaves out the uploads toolset: it reads local files and is available in stdio mode only (D-06).'
+          : 'GLITCHTIP_TOOLSETS=all leaves out the uploads toolset: GLITCHTIP_UPLOAD_ROOT is not set.',
+      );
+    } else if (config.uploads.root !== undefined) {
+      warnings.push(
+        'GLITCHTIP_UPLOAD_ROOT is set but the uploads toolset is not enabled, so it has no effect; add uploads to GLITCHTIP_TOOLSETS.',
+      );
+    }
   }
   return warnings;
 }

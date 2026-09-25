@@ -14,7 +14,7 @@ export interface ZipEntrySpec {
 export interface ZipOptions {
   /** Writes a ZIP64 end-of-central-directory locator before the EOCD. */
   readonly zip64Locator?: boolean;
-  readonly comment?: string;
+  readonly comment?: string | Buffer;
 }
 
 export function buildZip(entries: readonly ZipEntrySpec[], options: ZipOptions = {}): Buffer {
@@ -56,7 +56,9 @@ export function buildZip(entries: readonly ZipEntrySpec[], options: ZipOptions =
     locator.writeUInt32LE(0x07064b50, 0);
     tail.push(locator);
   }
-  const comment = Buffer.from(options.comment ?? '');
+  const comment = Buffer.isBuffer(options.comment)
+    ? options.comment
+    : Buffer.from(options.comment ?? '');
   const eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(0x06054b50, 0);
   eocd.writeUInt16LE(entries.length, 8);

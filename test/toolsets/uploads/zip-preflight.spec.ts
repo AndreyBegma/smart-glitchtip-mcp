@@ -71,6 +71,20 @@ describe('zip reader', () => {
     expect(await refusedWith(zip, readZipEntries)).toContain(reason);
   });
 
+  it('reads a valid zip whose comment contains a fake end-of-central-directory record', async () => {
+    // A fake record claiming ZIP64 and several disks, with bytes after it, so
+    // its own comment length does not reach the end of the file.
+    const fake = Buffer.alloc(22, 0xff);
+    fake.writeUInt32LE(0x06054b50, 0);
+    fake.writeUInt16LE(0, 20);
+    const comment = Buffer.concat([Buffer.from('built by '), fake, Buffer.from(' tooling')]);
+    const zip = buildZip([{ name: 'a.txt', data: 'hello' }], { comment });
+    const names = await withZip(zip, async (file) =>
+      (await readZipEntries(file)).map((entry) => entry.name),
+    );
+    expect(names).toEqual(['a.txt']);
+  });
+
   it('stops inflating at 4 MiB (a zip bomb is refused, not expanded)', async () => {
     const bomb = buildZip([{ name: 'manifest.json', data: Buffer.alloc(5 * 1024 * 1024) }]);
     const message = await refusedWith(bomb, async (file) =>
@@ -96,6 +110,16 @@ describe('ProGuard preflight', () => {
     const message = await refusedWith(zip, checkProguardZip);
     expect(message).toContain('<untrusted source="external" field="entry">notes.txt</untrusted>');
     expect(message).toContain('proguard/<uuid>.txt');
+  });
+
+  it.each([
+    'proguard/0f1e2d3c4b5a69788796a5b4c3d2e1f0.txt',
+    'proguard/----.txt',
+    'proguard/0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0-00.txt',
+    'proguard/0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1fz.txt',
+  ])('refuses %s: the name must be a hyphenated UUID', async (name) => {
+    const message = await refusedWith(buildZip([{ name, data: 'x' }]), checkProguardZip);
+    expect(message).toContain('every entry must be named proguard/<uuid>.txt');
   });
 
   it('refuses an empty zip', async () => {
@@ -153,6 +177,16 @@ describe('artifact bundle preflight', () => {
     const zip = buildZip([{ name: 'other.json', data: '{}' }]);
     expect(await refusedWith(zip, (file) => readBundleManifest(file, '1.0'))).toContain(
       'has no manifest.json',
+    );
+  });
+
+  it('refuses a bundle with manifest.json twice (GlitchTip would read the other copy)', async () => {
+    const zip = buildZip([
+      { name: 'manifest.json', data: manifest({ org: 'acme', release: '1.0' }) },
+      { name: 'manifest.json', data: manifest({ org: 'evil', release: '1.0' }) },
+    ]);
+    expect(await refusedWith(zip, (file) => readBundleManifest(file, '1.0'))).toContain(
+      'has more than one manifest.json',
     );
   });
 

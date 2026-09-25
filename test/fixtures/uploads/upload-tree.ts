@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,6 +26,8 @@ import { join } from 'node:path';
  *   root/out-link -> ../outside/secret.txt
  *   root/chain -> ../outside/back
  *   root/in-link -> app.sym
+ *   root/dangling -> ../outside/missing.txt
+ *   root/hard.sym                 a hard link to outside/secret.txt
  *   root/fifo                     a FIFO
  */
 export interface UploadTree {
@@ -45,6 +55,8 @@ export function uploadTree(): UploadTree {
   symlinkSync(join(root, 'app.sym'), join(outside, 'back'));
   symlinkSync('../outside/back', join(root, 'chain'));
   symlinkSync('app.sym', join(root, 'in-link'));
+  symlinkSync('../outside/missing.txt', join(root, 'dangling'));
+  linkSync(join(outside, 'secret.txt'), join(root, 'hard.sym'));
   execFileSync('mkfifo', [join(root, 'fifo')]);
   return {
     base,

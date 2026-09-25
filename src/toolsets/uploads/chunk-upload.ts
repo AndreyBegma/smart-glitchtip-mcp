@@ -85,6 +85,7 @@ export async function uploadInChunks(
   const sent = await sendMissing(client, org, file, info.chunkSize, chunks, first.missingChunks);
   const second = await assemble(checksum, chunks);
   if (isDone(second)) return outcome(second.state, sent);
+  if (second.state !== 'not_found') throw assemblyFailed(second);
   throw new UploadError(
     `GlitchTip still reports ${second.missingChunks.length} missing chunks after upload.`,
   );
@@ -139,13 +140,17 @@ async function sendMissing(
   chunks: readonly string[],
   missing: readonly string[],
 ): Promise<number> {
-  const wanted = new Set(missing);
-  for (const checksum of wanted) {
-    if (!chunks.includes(checksum)) throw unexpectedResponse('assemble');
+  const firstIndex = new Map<string, number>();
+  chunks.forEach((checksum, index) => {
+    if (!firstIndex.has(checksum)) firstIndex.set(checksum, index);
+  });
+  const order: number[] = [];
+  for (const checksum of new Set(missing)) {
+    const index = firstIndex.get(checksum);
+    if (index === undefined) throw unexpectedResponse('assemble');
+    order.push(index);
   }
-  const order = chunks.flatMap((checksum, index) =>
-    wanted.has(checksum) && chunks.indexOf(checksum) === index ? [index] : [],
-  );
+  order.sort((a, b) => a - b);
   let sent = 0;
   for (const index of order) {
     const position = index * chunkSize;

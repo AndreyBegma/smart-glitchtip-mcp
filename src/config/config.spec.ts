@@ -229,6 +229,27 @@ describe('uploads (D-22)', () => {
     ]);
   });
 
+  it.each([
+    ['http', { MCP_TRANSPORT: 'http' }, 'stdio mode only'],
+    ['stdio without a root', STDIO, 'GLITCHTIP_UPLOAD_ROOT: required'],
+  ])('treats all,uploads as naming uploads explicitly (%s)', (_, env, problem) => {
+    const problems = problemsOf({ ...env, GLITCHTIP_TOOLSETS: 'all,uploads' });
+    expect(problems).toEqual([expect.stringContaining(problem)]);
+    expect(withRoot(STDIO, 'all,uploads')).toMatchObject({
+      toolsets: [...TOOLSET_NAMES],
+      toolsetsMode: 'explicit',
+      toolsetsExplicit: true,
+    });
+  });
+
+  it('warns when GLITCHTIP_UPLOAD_ROOT is set but uploads is not enabled', () => {
+    expect(configWarnings(withRoot(STDIO, 'issues'))).toEqual([
+      'GLITCHTIP_UPLOAD_ROOT is set but the uploads toolset is not enabled, so it has no effect; add uploads to GLITCHTIP_TOOLSETS.',
+    ]);
+    const unset = loadConfig({ ...STDIO, GLITCHTIP_UPLOAD_ROOT: root() });
+    expect(configWarnings(unset)).toHaveLength(1);
+  });
+
   it('does not warn about uploads when the toolsets are the defaults', () => {
     const config = loadConfig({ ...HTTP, MCP_AUTH_TOKEN: 'a'.repeat(16), GLITCHTIP_TOKEN: 't' });
     expect(configWarnings(config)).toEqual([]);

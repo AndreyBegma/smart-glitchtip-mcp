@@ -109,11 +109,21 @@ async function findEndOfCentralDirectory(file: UploadFile): Promise<EndOfCentral
   const tailLength = Math.min(file.size, EOCD_SEARCH);
   const tailStart = file.size - tailLength;
   const tail = await readExactly(file, tailStart, tailLength);
+  // Scanning backwards, the signature can also appear inside the archive
+  // comment. A real record's comment ends exactly at the end of the file, and
+  // a candidate that fails to parse is skipped; only when none parses is the
+  // first failure reported.
+  let firstFailure: unknown;
   for (let at = tail.length - EOCD_SIZE; at >= 0; at--) {
     if (tail.readUInt32LE(at) !== EOCD_SIGNATURE) continue;
-    if (at + EOCD_SIZE + tail.readUInt16LE(at + 20) > tail.length) continue;
-    return parseEndOfCentralDirectory(file, tail, at, tailStart);
+    if (at + EOCD_SIZE + tail.readUInt16LE(at + 20) !== tail.length) continue;
+    try {
+      return parseEndOfCentralDirectory(file, tail, at, tailStart);
+    } catch (error) {
+      firstFailure ??= error;
+    }
   }
+  if (firstFailure !== undefined) throw firstFailure;
   return refuse(file, 'no end-of-central-directory record was found');
 }
 

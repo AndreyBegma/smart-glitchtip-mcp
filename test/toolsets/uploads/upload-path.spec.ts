@@ -1,7 +1,9 @@
+import { renameSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { UploadError } from '../../../src/toolsets/uploads/upload.error';
-import { resolveUploadPath } from '../../../src/toolsets/uploads/upload-path';
+import { confirmOpened, resolveUploadPath } from '../../../src/toolsets/uploads/upload-path';
 import { type UploadTree, uploadTree } from '../../fixtures/uploads/upload-tree';
 
 // Spec "Local file rules" and acceptance 4, at the function every path input
@@ -43,12 +45,14 @@ describe('refused', () => {
     ['../outside/secret.txt', 'resolves outside the upload root'],
     ['out-link', 'resolves outside the upload root'],
     ['.git/config', 'hidden (dot) file or directory'],
-    ['build/cfg', 'hidden (dot) file or directory'],
+    ['build/cfg', 'into a hidden (dot) path'],
     ['sub', 'is a directory; pass a file'],
     ['App.dSYM', '.dSYM directory; pass the DWARF file inside it'],
     ['fifo', 'is not a regular file'],
     ['empty.sym', 'is empty'],
-    ['missing.sym', 'Cannot read "missing.sym": ENOENT.'],
+    ['hard.sym', 'has more than one hard link'],
+    ['app.sym/', 'must name a file, not end with /'],
+    ['missing.sym', '"missing.sym" was not found'],
     ['a\0b', 'must not contain a NUL byte'],
     ['', 'must not be empty'],
     ['x'.repeat(4097), 'at most 4096 characters'],
@@ -60,6 +64,23 @@ describe('refused', () => {
     expect(await refusal(join(tree.outside, 'secret.txt'))).toContain(
       'resolves outside the upload root',
     );
+  });
+
+  it('answers the same for existing and missing paths outside the root or behind a dot', async () => {
+    // Each pair differs only in whether the thing exists; the answers must
+    // differ only in the path they repeat back.
+    const pairs = [
+      [join(tree.outside, 'secret.txt'), join(tree.outside, 'nothing.txt')],
+      ['/etc/passwd', '/etc/no-such-file'],
+      ['../outside/secret.txt', '../outside/nothing.txt'],
+      ['out-link', 'dangling'],
+      ['.git/config', '.git/nothing'],
+    ];
+    for (const [existing, missing] of pairs) {
+      const a = (await refusal(existing)).replace(JSON.stringify(existing), '<path>');
+      const b = (await refusal(missing)).replace(JSON.stringify(missing), '<path>');
+      expect(a, `${existing} vs ${missing}`).toBe(b);
+    }
   });
 
   it('a file over the cap, naming the cap', async () => {
@@ -82,6 +103,35 @@ describe('refused', () => {
       expect(message).not.toContain('.git');
     }
   });
+});
+
+describe('confirmOpened', () => {
+  async function openedAt(relativePath: string) {
+    const target = join(tree.root, relativePath);
+    const handle = await open(target, 'r');
+    const stats = await handle.stat();
+    return { handle, target, real: target, root: tree.root, stats, shown: '"f"' };
+  }
+
+  it.each(['proc', 'realpath'] as const)(
+    '%s: accepts a descriptor still at the checked path, refuses one that is not',
+    async (check) => {
+      tree.write('swap-a.sym', 'a');
+      tree.write('swap-b.sym', 'b');
+      const opened = await openedAt('swap-a.sym');
+      try {
+        await expect(confirmOpened(check, opened)).resolves.toBeUndefined();
+        // Another file now sits at the checked path; the descriptor still
+        // refers to the first one.
+        renameSync(join(tree.root, 'swap-b.sym'), opened.target);
+        await expect(confirmOpened(check, opened)).rejects.toThrow(
+          '"f" changed while it was being opened; try again.',
+        );
+      } finally {
+        await opened.handle.close();
+      }
+    },
+  );
 });
 
 describe('accepted', () => {

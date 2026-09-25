@@ -7,7 +7,8 @@ import { extractSmallEntry, readZipEntries } from './zip-directory';
 // otherwise reject with an empty 400 (ProGuard) or drop silently in a
 // background task (artifact bundles).
 
-const PROGUARD_ENTRY = /^proguard\/[0-9A-Fa-f-]+\.txt$/;
+const PROGUARD_ENTRY =
+  /^proguard\/[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\.txt$/;
 const MAX_PROGUARD_ENTRIES = 1000;
 const MANIFEST = 'manifest.json';
 
@@ -47,8 +48,13 @@ export async function readBundleManifest(
   release: string | undefined,
 ): Promise<BundleManifest> {
   const shown = JSON.stringify(file.given);
-  const entry = (await readZipEntries(file)).find((e) => e.name === MANIFEST);
-  if (!entry) throw new UploadError(`${shown} has no manifest.json at its root.`);
+  const manifests = (await readZipEntries(file)).filter((e) => e.name === MANIFEST);
+  if (manifests.length === 0) throw new UploadError(`${shown} has no manifest.json at its root.`);
+  // This reader and GlitchTip's zipfile would pick different copies (first vs last).
+  if (manifests.length > 1) {
+    throw new UploadError(`${shown} has more than one manifest.json; build it again.`);
+  }
+  const [entry] = manifests;
   const manifest = parseManifest(shown, await extractSmallEntry(file, entry));
   if (manifest.release !== release) {
     throw new UploadError(

@@ -54,7 +54,8 @@ const allowedUrls = z.string().transform((raw, ctx) => {
 /**
  * How GLITCHTIP_TOOLSETS chose the toolsets: by name, by `all`, or by being
  * unset. Rules that apply to a toolset asked for by name (D-22) need it,
- * because `all` is expanded here and looks like a list afterwards.
+ * because `all` is expanded here and looks like a list afterwards. A list
+ * that names `uploads` beside `all` counts as explicit.
  */
 export type ToolsetsMode = 'explicit' | 'all' | 'default';
 
@@ -65,7 +66,10 @@ export interface ToolsetSelection {
 
 const toolsets = z.string().transform((raw, ctx): ToolsetSelection => {
   const names = commaList(raw);
-  if (names.includes('all')) return { names: [...TOOLSET_NAMES], mode: 'all' };
+  // `all,uploads` still names uploads, and gets the explicit-name rules (D-22).
+  if (names.includes('all')) {
+    return { names: [...TOOLSET_NAMES], mode: names.includes('uploads') ? 'explicit' : 'all' };
+  }
   const unknown = names.filter((name) => !(TOOLSET_NAMES as readonly string[]).includes(name));
   if (unknown.length > 0) {
     ctx.addIssue({

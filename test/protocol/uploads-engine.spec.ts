@@ -255,6 +255,61 @@ describe('engine outcomes and failures', () => {
     expect(text).toBe('GlitchTip still reports 1 missing chunks after upload.');
   });
 
+  it('an `error` state on the second assemble is reported as such, not as missing chunks', async () => {
+    const file = small();
+    const mock = new MockGlitchTip()
+      .json('GET', CHUNK_UPLOAD, chunkInfo())
+      .on(
+        'POST',
+        DIF_ASSEMBLE,
+        assembleState(file.checksum, 'not_found', file.checksums),
+        jsonResponse({ [file.checksum]: { state: 'error', missingChunks: [], detail: 'bad' } }),
+      )
+      .on('POST', CHUNK_UPLOAD, new Response('', { status: 200 }));
+    const { text } = await server.call(mock, 'upload_debug_file', {
+      project: 'app',
+      path: 'small.debug',
+    });
+    expect(text).toBe(
+      'GlitchTip answered the assemble step with state "error": <untrusted source="glitchtip-config" field="detail">bad</untrusted>.',
+    );
+  });
+
+  it('sends each distinct missing chunk once, in file order, for many chunks', async () => {
+    // 64 KiB chunks, chunks 0 and 2 identical: one POST covers both.
+    const size = 64 * 1024;
+    const bytes = Buffer.concat([
+      Buffer.alloc(size, 1),
+      Buffer.alloc(size, 2),
+      Buffer.alloc(size, 1),
+      Buffer.alloc(size, 3),
+    ]);
+    tree.write('repeat.debug', bytes);
+    const piece = (i: number) => bytes.subarray(i * size, (i + 1) * size);
+    const [c0, c1, , c3] = [0, 1, 2, 3].map((i) => sha1(piece(i)));
+    const checksum = sha1(bytes);
+    const mock = new MockGlitchTip()
+      .json('GET', CHUNK_UPLOAD, chunkInfo({ chunkSize: size }))
+      .on(
+        'POST',
+        DIF_ASSEMBLE,
+        assembleState(checksum, 'not_found', [c3, c0, c0]),
+        assembleState(checksum, 'created'),
+      )
+      .on('POST', CHUNK_UPLOAD, new Response('', { status: 200 }));
+    const { isError, text } = await server.call(mock, 'upload_debug_file', {
+      project: 'app',
+      path: 'repeat.debug',
+    });
+    expect(isError, text).toBe(false);
+    const posts = mock.requests.filter((r) => r.method === 'POST' && r.url.href === CHUNK_UPLOAD);
+    const names = await Promise.all(
+      posts.map(async (p) => (await multipartFile(p, 'file_gzip')).name),
+    );
+    expect(names).toEqual([c0, c3]);
+    expect(names).not.toContain(c1);
+  });
+
   it.each([
     ['chunkSize', { chunkSize: 1024 }],
     ['compression', { compression: [] }],

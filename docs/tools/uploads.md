@@ -35,36 +35,56 @@ that has none of them gets a tool error naming the scopes it needs.
 
 Startup rules:
 
-- `uploads` named in `GLITCHTIP_TOOLSETS` with `MCP_TRANSPORT=http` → startup
-  fails: the toolset is stdio only.
+- `uploads` named in `GLITCHTIP_TOOLSETS` (also beside `all`, as in
+  `all,uploads`) with `MCP_TRANSPORT=http` → startup fails: the toolset is
+  stdio only.
 - `uploads` named in stdio without `GLITCHTIP_UPLOAD_ROOT` → startup fails,
   naming the key.
 - `GLITCHTIP_TOOLSETS=all` in http mode, or in stdio without a root →
   `uploads` is left out, with one warning line.
 - A `GLITCHTIP_UPLOAD_ROOT` that is set is checked whatever the toolsets: it
   must be absolute, exist, be a directory and not be `/`. It is stored as its
-  realpath.
+  realpath. Set while `uploads` is not enabled, it logs a warning that it has
+  no effect.
 
 ## Local file rules
 
 Every `path` input is resolved before any request:
 
-1. A non-empty string of at most 4096 characters with no NUL byte; relative
-   (to the root) or absolute.
-2. Its realpath must be the root or below it. Symlinks are followed and
-   judged by where they land: one that stays inside the root works, one that
-   leaves it is refused with "resolves outside the upload root", and where it
-   landed is not named.
-3. No segment of the resolved path below the root may start with `.`:
-   `.git`, `.ssh`, `.env` and the like are unreachable, also through a
-   symlink that points into them. For a build output under `.next/…`, set the
-   root inside it.
-4. The file is opened without following a final symlink and checked on the
-   open descriptor: a regular file (no directory, FIFO, socket or device), the
-   same file that was resolved, 1 byte to `GLITCHTIP_UPLOAD_MAX_BYTES` (and to
-   the instance's `maxFileSize` for chunked uploads). Every read goes through
-   that descriptor.
-5. A `.dSYM` directory is refused with a hint: pass the DWARF file inside it
+1. A non-empty string of at most 4096 characters with no NUL byte and no
+   trailing `/`. It is relative to the root, or absolute; an absolute path
+   must be spelled under the root as `get_chunk_upload_info` shows it (its
+   realpath).
+2. Checked as written, before any filesystem call: it must stay inside the
+   root after `..` is applied, and no segment below the root may start with
+   `.`.
+3. Its realpath must also be inside the root and free of dot-segments.
+   Symlinks are followed and judged by where they land: one that stays inside
+   the root works. `.git`, `.ssh`, `.env` and the like are unreachable, also
+   through a symlink that points into them; for a build output under
+   `.next/…`, set the root inside it.
+4. A path that does not exist, resolves outside the root, or resolves into a
+   dot-segment gets one answer: `"<path>" was not found, or resolves outside
+   the upload root or into a hidden (dot) path.` The tools therefore cannot
+   be used to learn what exists outside the root or behind a dot-directory.
+5. The file is opened without following a final symlink (`O_NOFOLLOW` guards
+   the last component only) and checked on the open descriptor: a regular
+   file (no directory, FIFO, socket or device), the same dev/ino as the
+   resolved path, **one hard link only** (a hard link can name a file
+   anywhere on the same filesystem; the kernel's `protected_hardlinks` is not
+   relied on), and 1 byte to `GLITCHTIP_UPLOAD_MAX_BYTES` (and to the
+   instance's `maxFileSize` for chunked uploads).
+6. The path the open descriptor refers to is then checked. The dev/ino
+   comparison alone does not close the race: a directory on the path swapped
+   for a symlink between the realpath and the open makes the open land
+   outside, and both `stat` and `fstat` then see that outside file. On Linux
+   the descriptor's path is read from `/proc/self/fd/<fd>`; it must equal the
+   checked realpath and pass rules 2–3 again, and without `/proc` the file is
+   refused. That closes the race. On other systems the path is resolved again
+   after the open, and must equal the checked realpath with the same dev/ino
+   as the descriptor. That narrows the race window but does not close it.
+7. Every read goes through that descriptor.
+8. A `.dSYM` directory is refused with a hint: pass the DWARF file inside it
    (`<name>.dSYM/Contents/Resources/DWARF/<name>`).
 
 Errors name the path as the caller gave it, never the resolved absolute path.
@@ -127,7 +147,8 @@ is queued (each assemble call enqueues another task).
 | `path` | local path to a zip, at most 32 MiB | required |
 
 Before any request, the zip's central directory is read: it must hold 1–1000
-entries, each named `proguard/<uuid>.txt`. Then one multipart POST (field
+entries, each named `proguard/<uuid>.txt`, where `<uuid>` is a hyphenated
+UUID (`8-4-4-4-12` hex digits). Then one multipart POST (field
 `file`). The result lists each mapping: `id`, `debugId`, `size`, `sha1`, and
 its name (fenced).
 
@@ -140,7 +161,9 @@ its name (fenced).
 | `projects` | project slugs, 0–20, unique | `[]` |
 
 Not idempotent: every call re-runs assembly. Before any upload the manifest is
-read locally, because GlitchTip drops a mismatched bundle silently: its
+read locally, because GlitchTip drops a mismatched bundle silently. There must
+be exactly one `manifest.json`: a second copy is refused, because this reader
+and GlitchTip's would pick different ones. Its
 `release` must equal `release` (absent equals absent), its `files` must be a
 non-empty object, its `org` must equal the organization, and without a
 `release` at least one file must carry a `debug-id` header. The release is
@@ -163,4 +186,6 @@ multi-disk, encrypted entries and compression other than stored or deflate.
 - 413 on a chunk: the instance's proxy limit is below the advertised chunk size.
 - An answer that is not JSON or not the expected shape: `GlitchTip returned an
   unexpected response for <step>.`
-- A file-system error: `Cannot read "<path>": <code>` (`ENOENT`, `EACCES`, `ELOOP`…).
+- A file-system error on a file already inside the root: `Cannot read
+  "<path>": <code>` (`EACCES`, `ELOOP`…). Resolution failures use the single
+  message of rule 4 above.
