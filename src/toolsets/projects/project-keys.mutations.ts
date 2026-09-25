@@ -42,6 +42,13 @@ const deleteProjectKeyArgs = z.object({
   format: formatParam,
 });
 
+function notPreserved(param: string): string {
+  return (
+    `Not updated: GlitchTip's response did not include ${param}, so its current value ` +
+    `cannot be preserved; pass \`${param}\` explicitly or retry.`
+  );
+}
+
 @GlitchTipTools()
 export class ProjectKeysMutations {
   constructor(
@@ -116,6 +123,18 @@ export class ProjectKeysMutations {
           },
         }),
     );
+    // The PUT is full-replace. GlitchTip's canonical field for the label is `label`; `name`
+    // may be absent from the read. Neither, or no rateLimit, refuses (AGENTS.md rule 15).
+    if (args.label === undefined && current.name === undefined && current.label === undefined) {
+      return error(notPreserved('label'));
+    }
+    if (args.rate_limit === undefined && current.rateLimit === undefined) {
+      return error(notPreserved('rate_limit'));
+    }
+    const body = {
+      name: args.label ?? current.name ?? current.label ?? null,
+      rateLimit: args.rate_limit !== undefined ? args.rate_limit : current.rateLimit,
+    };
     const updated = await glitchtip.client.call(
       {
         name: 'update project key',
@@ -129,10 +148,7 @@ export class ProjectKeysMutations {
           params: {
             path: { organization_slug: org, project_slug: args.project, key_id: args.key_id },
           },
-          body: {
-            name: args.label ?? current.name,
-            rateLimit: args.rate_limit !== undefined ? args.rate_limit : current.rateLimit,
-          },
+          body,
         }),
     );
     return this.output.render(

@@ -129,6 +129,57 @@ describe('update_project', () => {
     });
   });
 
+  // BUG-20260925-017: ProjectIn is full-replace, so a field the GET left out would be cleared.
+  for (const [field, param] of [
+    ['name', 'name'],
+    ['slug', 'new_slug'],
+    ['platform', 'platform'],
+    ['eventThrottleRate', 'event_throttle_rate'],
+  ] as const) {
+    it(`refuses, without a PUT, when the GET did not return ${field} and it was not given`, async () => {
+      const { [field]: _omitted, ...partial } = CURRENT_PROJECT;
+      const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/`, partial);
+      const changed =
+        field === 'eventThrottleRate' ? { platform: 'go' } : { event_throttle_rate: 1 };
+      const { text, isError } = await call(mock, 'update_project', {
+        organization: 'acme',
+        project: 'web',
+        ...changed,
+      });
+      expect(isError).toBe(true);
+      expect(text).toContain(`GlitchTip's response did not include ${field}`);
+      expect(text).toContain(`pass \`${param}\` explicitly`);
+      expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+    });
+  }
+
+  it('sends a field the GET left out when the caller gives it', async () => {
+    const { platform: _omitted, ...partial } = CURRENT_PROJECT;
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/projects/acme/web/`, partial)
+      .json('PUT', `${API}/projects/acme/web/`, { ...CURRENT_PROJECT, platform: 'go' });
+    const { isError } = await call(mock, 'update_project', {
+      organization: 'acme',
+      project: 'web',
+      platform: 'go',
+    });
+    expect(isError).toBe(false);
+    expect(JSON.parse(mock.requests[1].body).platform).toBe('go');
+  });
+
+  it('re-sends a null the GET returned as null', async () => {
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/projects/acme/web/`, { ...CURRENT_PROJECT, platform: null })
+      .json('PUT', `${API}/projects/acme/web/`, { ...CURRENT_PROJECT, platform: null });
+    await call(mock, 'update_project', { organization: 'acme', project: 'web', name: 'Web 2' });
+    expect(JSON.parse(mock.requests[1].body)).toEqual({
+      name: 'Web 2',
+      slug: 'web',
+      platform: null,
+      eventThrottleRate: 5,
+    });
+  });
+
   it('refuses when no field is given, without calling GlitchTip', async () => {
     const mock = new MockGlitchTip();
     const { text, isError } = await call(mock, 'update_project', {

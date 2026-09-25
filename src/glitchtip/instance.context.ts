@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Redactor } from './redactor';
 
 /**
  * The GlitchTip instance one request acts on: where, as whom, and in which
@@ -42,7 +43,12 @@ export class ResolvedInstance {
 
   /** Removes the token from text that may have come back from GlitchTip. */
   redact(text: string): string {
-    return this.#token ? text.split(this.#token).join('[redacted]') : text;
+    return this.redactor().redact(text);
+  }
+
+  /** A redactor for the token and any secrets a caller holds besides it. */
+  redactor(extraSecrets: readonly string[] = []): Redactor {
+    return new Redactor([this.#token, ...extraSecrets]);
   }
 
   toJSON(): object {

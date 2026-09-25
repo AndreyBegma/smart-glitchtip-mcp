@@ -1,4 +1,5 @@
 import { AgentFacingError } from '../agent-facing.error';
+import type { Redactor } from './redactor';
 
 export type GlitchTipErrorKind =
   | 'invalid'
@@ -48,14 +49,18 @@ export class GlitchTipError extends AgentFacingError {
   }
 }
 
-/** Maps a non-2xx response that retries did not fix. */
+/**
+ * Maps a non-2xx response that retries did not fix. `redactor` is applied to
+ * GlitchTip's detail before it is cut to size, so no secret is left half-cut.
+ */
 export function errorFromResponse(
   status: number,
   body: unknown,
   operation: Operation,
+  redactor: Redactor,
   retryAfterSeconds?: number,
 ): GlitchTipError {
-  const detail = detailOf(body);
+  const detail = detailOf(body, redactor);
   if (status === 400 || status === 422) {
     return new GlitchTipError(
       'invalid',
@@ -142,11 +147,17 @@ function notFoundMessage({ name, resource, id, org }: Operation): string {
   return org ? `${what} was not found in ${org}.` : `${what} was not found.`;
 }
 
-/** GlitchTip's `detail` (a string, or django-ninja's list of validation errors), bounded. */
-function detailOf(body: unknown): string | undefined {
+/**
+ * GlitchTip's `detail` (a string, or django-ninja's list of validation
+ * errors), redacted and bounded. Secrets go first, whole; the cut comes after;
+ * then a secret's start left at the end is removed — whether this cut left it
+ * or GlitchTip cut its own message there (BUG-20260925-017).
+ */
+function detailOf(body: unknown, redactor: Redactor): string | undefined {
   if (body === undefined || body === null || body === '') return undefined;
   const raw =
     typeof body === 'object' && 'detail' in body ? (body as { detail: unknown }).detail : body;
-  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
-  return text.length > DETAIL_LIMIT ? `${text.slice(0, DETAIL_LIMIT)}…` : text;
+  const text = redactor.redact(typeof raw === 'string' ? raw : JSON.stringify(raw));
+  if (text.length <= DETAIL_LIMIT) return redactor.redactCutEnd(text);
+  return `${redactor.redactCutEnd(text.slice(0, DETAIL_LIMIT))}…`;
 }
