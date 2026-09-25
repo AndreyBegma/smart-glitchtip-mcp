@@ -22,9 +22,21 @@ describe('toolset registry (acceptance 15)', () => {
     expect(TOOLSETS.find((t) => t.name === 'organizations')?.available).toBe(true);
   });
 
-  it('every available toolset contributes at least one read tool', () => {
+  it('every available toolset contributes at least one controller', () => {
     for (const toolset of TOOLSETS) {
-      if (toolset.available) expect(toolset.read.length, toolset.name).toBeGreaterThan(0);
+      if (toolset.available) {
+        expect(toolset.read.length + toolset.write.length, toolset.name).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('a write-only toolset (ingest) contributes nothing in read-only mode', () => {
+    const ingest = TOOLSETS.find((t) => t.name === 'ingest');
+    expect(ingest?.read).toEqual([]);
+    expect(ingest?.write.length).toBeGreaterThan(0);
+    const readOnly = selectToolsets(config({ readOnly: true }));
+    for (const write of ingest?.write ?? []) {
+      expect(readOnly.controllers).not.toContain(write);
     }
   });
 
