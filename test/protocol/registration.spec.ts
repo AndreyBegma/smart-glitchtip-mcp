@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig } from '../../src/config/config';
-import { TOOLSET_NAMES } from '../../src/toolsets/toolset';
+import { TOOLSETS } from '../../src/mcp/toolset.registry';
+import { DEFAULT_TOOLSETS, TOOLSET_NAMES } from '../../src/toolsets/toolset';
 import { type Booted, bootInMemory } from '../support/boot';
 import { MockGlitchTip } from '../support/mock-glitchtip';
 
@@ -113,9 +114,14 @@ describe('read-only across every toolset', () => {
 
 describe('toolset selection (acceptance 4)', () => {
   it('starts with a not-yet-available toolset, lists only whoami, and warns', async () => {
-    const tools = await toolsWith({ GLITCHTIP_TOOLSETS: 'alerts', GLITCHTIP_READ_ONLY: 'false' });
+    const pending = TOOLSETS.find((t) => !t.available);
+    if (!pending) throw new Error('expected at least one toolset to still be pending');
+    const tools = await toolsWith({
+      GLITCHTIP_TOOLSETS: pending.name,
+      GLITCHTIP_READ_ONLY: 'false',
+    });
     expect(tools.map((t) => t.name)).toEqual(['whoami']);
-    expect(booted?.logs()).toContain('"toolset":"alerts"');
+    expect(booted?.logs()).toContain(`"toolset":"${pending.name}"`);
     expect(booted?.logs()).toContain('is enabled but not yet available.');
   });
 
@@ -130,9 +136,41 @@ describe('toolset selection (acceptance 4)', () => {
     for (const name of TOOLSET_NAMES) expect(problems[0]).toContain(name);
   });
 
-  it('with the default toolsets, lists organizations and whoami (the rest are pending)', async () => {
+  it('with the default toolsets, every available one contributes a tool and every pending one warns', async () => {
+    const registryByName = new Map(TOOLSETS.map((t) => [t.name, t]));
+    const toolsOf = new Map<string, readonly string[]>();
+    for (const name of DEFAULT_TOOLSETS) {
+      const solo = await bootInMemory(
+        { GLITCHTIP_TOKEN: 'tok', GLITCHTIP_TOOLSETS: name, GLITCHTIP_READ_ONLY: 'false' },
+        new MockGlitchTip(),
+      );
+      const { tools: soloTools } = await solo.client.listTools();
+      toolsOf.set(
+        name,
+        soloTools.map((t) => t.name).filter((n) => n !== 'whoami'),
+      );
+      await solo.close();
+    }
+
     const tools = await toolsWith({});
-    expect(tools.map((t) => t.name)).toContain('list_organizations');
-    expect(booted?.logs()).toContain('"toolset":"issues"');
+    const names = new Set(tools.map((t) => t.name));
+    const logs = booted?.logs() ?? '';
+    const pendingWarning = 'is enabled but not yet available.';
+
+    let anyPending = false;
+    for (const name of DEFAULT_TOOLSETS) {
+      if (registryByName.get(name)?.available) {
+        const own = toolsOf.get(name) ?? [];
+        expect(
+          own.some((n) => names.has(n)),
+          `${name} should contribute at least one tool`,
+        ).toBe(true);
+      } else {
+        anyPending = true;
+        expect(logs, name).toContain(`"toolset":"${name}"`);
+        expect(logs, name).toContain(pendingWarning);
+      }
+    }
+    if (!anyPending) expect(logs).not.toContain(pendingWarning);
   });
 });
