@@ -1,3 +1,5 @@
+import { neutralise } from './sanitize';
+
 /**
  * Where fenced text came from (D-18). When one value mixes origins, the most
  * exposed wins: glitchtip-event over external over glitchtip-user over
@@ -29,8 +31,9 @@ export const UNTRUSTED_CLOSE_TAG = '</untrusted>';
 /**
  * Fences text that came from GlitchTip (D-18). It is marked as data: the
  * agent reading the result must not follow instructions or URLs inside it.
- * Every `<` inside is escaped so the payload cannot close the fence or open
- * a fence of its own.
+ * Control and invisible characters are neutralised first (BUG-20260925-016)
+ * so they cannot hide or reorder the fenced text; every `<` inside is
+ * escaped so the payload cannot close the fence or open a fence of its own.
  */
 export function untrusted(
   field: string,
@@ -38,6 +41,8 @@ export function untrusted(
   source: UntrustedSource = 'glitchtip-event',
 ): string {
   const safeField = field.replace(/[^A-Za-z0-9_.-]/g, '');
-  const body = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const body = neutralise(text, { keepNewlines: true })
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;');
   return `<untrusted source="${source}" field="${safeField}">${body}${UNTRUSTED_CLOSE_TAG}`;
 }

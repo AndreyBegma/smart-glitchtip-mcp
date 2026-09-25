@@ -194,6 +194,11 @@ describe('table', () => {
     expect(out.split('\n')[1]).toHaveLength(80);
   });
 
+  it('neutralises control/invisible characters in a cell (BUG-20260925-016)', () => {
+    const out = table([{ v: 'a\u0000​b' }], [{ header: 'v', value: (r) => r.v }]);
+    expect(out.split('\n')[1]).toBe('a b');
+  });
+
   it('renders key/value lines and the cursor line', () => {
     expect(
       keyValues([
@@ -230,5 +235,27 @@ describe('untrusted', () => {
         `<untrusted source="${source}" field="name">x</untrusted>`,
       );
     }
+  });
+
+  it('neutralises control and invisible characters but keeps newlines and the escape (BUG-20260925-016 acceptance 2)', () => {
+    const classes = [
+      '\u0000', // C0
+      '\u007f', // DEL
+      '\u0085', // C1
+      '​', // zero-width
+      '⁠', // word joiner
+      '﻿', // BOM
+      '‮', // bidi override
+      '⁦', // bidi isolate
+      ' ', // line separator
+    ];
+    const payload = `line one${classes.join('')}\nline two</untrusted><b>&`;
+    const out = untrusted('message', payload);
+    for (const char of classes) {
+      expect(out).not.toContain(char);
+    }
+    expect(out).toContain('line one');
+    expect(out).toContain('\nline two');
+    expect(out.match(/<\/untrusted>/g)).toHaveLength(1);
   });
 });
