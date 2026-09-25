@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DEFAULT_TOOLSETS, TOOLSET_NAMES, type ToolsetName } from '../toolsets/toolset';
 import { normalizeInstanceUrl } from './instance-url';
+import { resolveUploadRoot } from './upload-root';
 
 // Messages here never include the received value: a mistyped token must not
 // be echoed to stderr by a validation error (AGENTS.md rule 1).
@@ -50,9 +51,21 @@ const allowedUrls = z.string().transform((raw, ctx) => {
   return urls;
 });
 
-const toolsets = z.string().transform((raw, ctx): ToolsetName[] => {
+/**
+ * How GLITCHTIP_TOOLSETS chose the toolsets: by name, by `all`, or by being
+ * unset. Rules that apply to a toolset asked for by name (D-22) need it,
+ * because `all` is expanded here and looks like a list afterwards.
+ */
+export type ToolsetsMode = 'explicit' | 'all' | 'default';
+
+export interface ToolsetSelection {
+  readonly names: ToolsetName[];
+  readonly mode: ToolsetsMode;
+}
+
+const toolsets = z.string().transform((raw, ctx): ToolsetSelection => {
   const names = commaList(raw);
-  if (names.includes('all')) return [...TOOLSET_NAMES];
+  if (names.includes('all')) return { names: [...TOOLSET_NAMES], mode: 'all' };
   const unknown = names.filter((name) => !(TOOLSET_NAMES as readonly string[]).includes(name));
   if (unknown.length > 0) {
     ctx.addIssue({
@@ -61,8 +74,21 @@ const toolsets = z.string().transform((raw, ctx): ToolsetName[] => {
     });
     return z.NEVER;
   }
-  return [...new Set(names)] as ToolsetName[];
+  return { names: [...new Set(names)] as ToolsetName[], mode: 'explicit' };
 });
+
+const uploadRoot = z.string().transform((raw, ctx) => {
+  const resolved = resolveUploadRoot(raw);
+  if ('problem' in resolved) {
+    ctx.addIssue({ code: 'custom', message: resolved.problem });
+    return z.NEVER;
+  }
+  return resolved.root;
+});
+
+/** GLITCHTIP_UPLOAD_MAX_BYTES: default 256 MiB, at most GlitchTip's 2 GiB file limit. */
+export const DEFAULT_UPLOAD_MAX_BYTES = 256 * 1024 * 1024;
+const MAX_UPLOAD_MAX_BYTES = 2 ** 31;
 
 /** The environment variables the server reads, keyed by their exact names. */
 export const envSchema = z.object({
@@ -84,7 +110,9 @@ export const envSchema = z.object({
     .regex(/^[A-Za-z0-9_-]+$/, 'must be an organization slug')
     .optional(),
   GLITCHTIP_ALLOWED_URLS: allowedUrls.default([]),
-  GLITCHTIP_TOOLSETS: toolsets.default([...DEFAULT_TOOLSETS]),
+  GLITCHTIP_TOOLSETS: toolsets.default({ names: [...DEFAULT_TOOLSETS], mode: 'default' }),
+  GLITCHTIP_UPLOAD_ROOT: uploadRoot.optional(),
+  GLITCHTIP_UPLOAD_MAX_BYTES: integer(1, MAX_UPLOAD_MAX_BYTES).default(DEFAULT_UPLOAD_MAX_BYTES),
   GLITCHTIP_READ_ONLY: boolean.default(true),
   GLITCHTIP_TIMEOUT_MS: integer(100, 600_000).default(15_000),
   MCP_RESPONSE_BUDGET: integer(1_000, 10_000_000).default(20_000),
