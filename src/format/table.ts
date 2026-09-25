@@ -1,3 +1,5 @@
+import { flatten } from './sanitize';
+
 export type Cell = string | number | boolean | null | undefined;
 
 export interface Column<Row> {
@@ -43,7 +45,7 @@ export function withCursor(body: string, nextCursor: string | undefined): string
 
 function cellText(value: Cell, limit = CELL_LIMIT): string {
   if (value === undefined || value === null) return '-';
-  const flat = String(value).replace(/\s+/g, ' ').trim();
+  const flat = flatten(String(value));
   if (flat === '') return '-';
   return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
 }

@@ -5,7 +5,7 @@ import { APP_CONFIG, type AppConfig } from '../config/config';
 import { applyBudget } from './budget';
 import { applyJsonBudget } from './json-budget';
 import { text } from './result';
-import { type UntrustedSource, untrusted } from './untrusted';
+import { type UntrustedSource, untrustedJson } from './untrusted';
 
 /** The `format` argument every tool accepts. */
 export const formatParam = z
@@ -77,7 +77,7 @@ export class ToolOutput {
     const budget = this.config.responseBudget;
     const fence = view.untrusted;
     if (!fence) return serialise(applyJsonBudget(value, budget));
-    const wrap = (json: string) => untrusted(fence.field, json, fence.source);
+    const wrap = (json: string) => untrustedJson(fence.field, json, fence.source);
     // Budget the JSON for the room the fence leaves; escaping `&` and `<`
     // can still push it over, so tighten by the excess until it fits.
     let room = budget - wrap('').length;
