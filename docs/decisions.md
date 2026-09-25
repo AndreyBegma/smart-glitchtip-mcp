@@ -282,3 +282,14 @@ whose target *is* the organization, so there `organization` is required.
 server filter the ids out; it cannot redirect a confirmed target to a different
 object. Requiring `organization` everywhere doubles every destructive call for
 no protection the confirm does not already give.
+
+## D-25 — `set_owner` is on the api_request denylist (amends D-23)
+
+**Decision.** `POST organizations/*/members/*/set_owner` is denied in
+`api_request` for every method. Ownership transfer stays reachable only through
+the members toolset's explicit, confirmed `transfer_organization_ownership`.
+
+**Why.** The same takeover-by-prompt-injection argument as D-23, and an
+explicit tool already exists — the escape hatch must not be a back door around
+its confirm.
+
