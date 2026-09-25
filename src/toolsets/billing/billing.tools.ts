@@ -27,6 +27,14 @@ import {
   periodsAgoParam,
   STRIPE_UNTRUSTED_SENTENCE,
 } from './billing.params';
+import {
+  dailyEventsCountSchema,
+  overageStatusSchema,
+  parseOrMalformed,
+  stripeProductExpandedPriceSchema,
+  stripeSubscriptionSchema,
+  subscriptionUsageSchema,
+} from './billing.validate';
 import { asMemberCall } from './billing-errors';
 
 type SocialApp = components['schemas']['SocialAppSchema'];
@@ -75,9 +83,10 @@ export class BillingTools {
     if (enabled === false) {
       return this.output.render(args.format, messageView(billingDisabledSentence(instance.origin)));
     }
-    const products = await client.call({ name: 'list billing plans', scopes: [] }, (api) =>
+    const raw = await client.call({ name: 'list billing plans', scopes: [] }, (api) =>
       api.GET('/api/0/stripe/products/'),
     );
+    const products = parseOrMalformed(z.array(stripeProductExpandedPriceSchema), raw);
     return this.output.render(
       args.format,
       billingPlansListView(products, enabled === undefined ? BILLING_UNKNOWN_NOTE : undefined),
@@ -106,7 +115,7 @@ export class BillingTools {
         messageView(billingDisabledSentence(glitchtip.instance.origin)),
       );
     }
-    const subscription = await asMemberCall(
+    const raw = await asMemberCall(
       glitchtip.client.call({ name: 'get subscription', scopes: [] }, (api) =>
         api.GET('/api/0/stripe/subscriptions/{organization_slug}/', {
           params: { path: { organization_slug: org } },
@@ -114,6 +123,7 @@ export class BillingTools {
       ),
       org,
     );
+    const subscription = parseOrMalformed(stripeSubscriptionSchema.nullable(), raw);
     return this.output.render(
       args.format,
       subscriptionView(subscription, org, enabled === undefined ? BILLING_UNKNOWN_NOTE : undefined),
@@ -135,7 +145,7 @@ export class BillingTools {
   ): Promise<CallToolResult> {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
-    const [enabled, usage] = await Promise.all([
+    const [enabled, raw] = await Promise.all([
       fetchBillingEnabled(glitchtip.client),
       asMemberCall(
         glitchtip.client.call({ name: 'get event usage', scopes: [] }, (api) =>
@@ -149,6 +159,7 @@ export class BillingTools {
         org,
       ),
     ]);
+    const usage = parseOrMalformed(subscriptionUsageSchema, raw);
     return this.output.render(args.format, eventUsageView(usage, eventUsageWindowLine(enabled)));
   }
 
@@ -164,7 +175,7 @@ export class BillingTools {
   ): Promise<CallToolResult> {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
-    const usage = await asMemberCall(
+    const raw = await asMemberCall(
       glitchtip.client.call({ name: 'get daily event usage', scopes: [] }, (api) =>
         api.GET('/api/0/stripe/subscriptions/{organization_slug}/events_count/daily/', {
           params: { path: { organization_slug: org } },
@@ -172,6 +183,7 @@ export class BillingTools {
       ),
       org,
     );
+    const usage = parseOrMalformed(dailyEventsCountSchema, raw);
     return this.output.render(args.format, dailyEventUsageView(usage.data, org));
   }
 
@@ -197,9 +209,9 @@ export class BillingTools {
     if (!args.include_organization_login) {
       return this.output.render(args.format, instanceSettingsView(settings));
     }
-    const org = await glitchtip.organization(args.organization);
     let organizationLogin: { org: string; apps: readonly SocialApp[] } | { error: string };
     try {
+      const org = await glitchtip.organization(args.organization);
       const loginSettings = await glitchtip.client.call(
         { name: 'get organization login settings', scopes: [] },
         (api) =>
@@ -228,7 +240,14 @@ export class BillingTools {
   ): Promise<CallToolResult> {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
-    const status = await asMemberCall(
+    const enabled = await fetchBillingEnabled(glitchtip.client);
+    if (enabled === false) {
+      return this.output.render(
+        args.format,
+        messageView(billingDisabledSentence(glitchtip.instance.origin)),
+      );
+    }
+    const raw = await asMemberCall(
       glitchtip.client.call({ name: 'get overage status', scopes: [] }, (api) =>
         api.GET('/api/0/stripe/subscriptions/{organization_slug}/overage/', {
           params: { path: { organization_slug: org } },
@@ -236,6 +255,10 @@ export class BillingTools {
       ),
       org,
     );
-    return this.output.render(args.format, overageStatusView(status, org));
+    const status = parseOrMalformed(overageStatusSchema, raw);
+    return this.output.render(
+      args.format,
+      overageStatusView(status, org, enabled === undefined ? BILLING_UNKNOWN_NOTE : undefined),
+    );
   }
 }

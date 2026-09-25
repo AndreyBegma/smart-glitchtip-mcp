@@ -26,5 +26,13 @@ export function parseDsn(dsn: string): ParsedDsn | undefined {
   if (!last || !/^\d+$/.test(last)) return undefined;
   const projectId = Number(last);
   if (!Number.isSafeInteger(projectId) || projectId <= 0) return undefined;
-  return { publicKey: decodeURIComponent(url.username), projectId, host: url.host };
+  // A malformed percent-escape (e.g. a lone "%") makes decodeURIComponent
+  // throw URIError; a value that cannot be decoded is not a usable DSN.
+  let publicKey: string;
+  try {
+    publicKey = decodeURIComponent(url.username);
+  } catch {
+    return undefined;
+  }
+  return { publicKey, projectId, host: url.host };
 }

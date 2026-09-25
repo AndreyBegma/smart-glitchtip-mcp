@@ -47,4 +47,11 @@ describe('parseDsn', () => {
   it('rejects project id 0', () => {
     expect(parseDsn('https://pub@glitchtip.test/0')).toBeUndefined();
   });
+
+  it('rejects a malformed percent-escape in the public key instead of throwing (blocker 2)', () => {
+    expect(() => parseDsn('https://%@glitchtip.test/42')).not.toThrow();
+    expect(parseDsn('https://%@glitchtip.test/42')).toBeUndefined();
+    expect(() => parseDsn('https://%zz@glitchtip.test/42')).not.toThrow();
+    expect(parseDsn('https://%zz@glitchtip.test/42')).toBeUndefined();
+  });
 });

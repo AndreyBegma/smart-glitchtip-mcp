@@ -36,7 +36,9 @@ export function messageView(text: string): View {
 }
 
 function priceLine(price: Price): string {
-  return `${price.stripeID} ${price.price} / ${price.interval}`;
+  const stripeID = untrusted('price.stripeID', capText(price.stripeID), 'external');
+  const interval = untrusted('price.interval', capText(price.interval), 'external');
+  return `${stripeID} ${price.price} / ${interval}`;
 }
 
 function otherPrices(product: Product): Price[] {
@@ -50,8 +52,9 @@ export function billingPlansListView(products: readonly Product[], note?: string
       if (products.length === 0) return appendNote('This instance lists no public plans.', note);
       const blocks = products.map((product) => {
         const rest = otherPrices(product);
+        const stripeID = untrusted('stripeID', capText(product.stripeID), 'external');
         const lines = [
-          `${product.stripeID} — events quota: ${product.events}`,
+          `${stripeID} — events quota: ${product.events}`,
           `  default price: ${priceLine(product.defaultPrice)}`,
           rest.length > 0
             ? `  other prices: ${rest.map(priceLine).join('; ')}`
@@ -237,26 +240,33 @@ function currency(cents: number): string {
   return `$${(cents / 100).toFixed(2)} (${cents}c)`;
 }
 
-export function overageStatusView(status: Overage, org: string): View {
+export function overageStatusView(status: Overage, org: string, note?: string): View {
   return {
     text: () =>
-      keyValues([
-        ['organization', org],
-        ['enabled', status.enabled],
-        ['eligible', status.eligible],
-        ['configured', status.configured],
-        ['cap', currency(status.capCents)],
-        ['capUnits', status.capUnits],
-        ['quota', status.quota],
-        ['usage', status.usage],
-        ['overageUnits', status.overageUnits],
-        ['overageCost', currency(status.overageCostCents)],
-        ['throttleRate', status.throttleRate],
-      ]),
-    json: () => ({ organization: org, ...status }),
+      appendNote(
+        keyValues([
+          ['organization', org],
+          ['enabled', status.enabled],
+          ['eligible', status.eligible],
+          ['configured', status.configured],
+          ['cap', currency(status.capCents)],
+          ['capUnits', status.capUnits],
+          ['quota', status.quota],
+          ['usage', status.usage],
+          ['overageUnits', status.overageUnits],
+          ['overageCost', currency(status.overageCostCents)],
+          ['throttleRate', status.throttleRate],
+        ]),
+        note,
+      ),
+    json: () => ({ organization: org, ...status, ...(note ? { note } : {}) }),
   };
 }
 
-export function linkView(url: string): View {
-  return { text: () => url, json: () => ({ url }) };
+/** The note, if any, goes on its own line above the URL — the URL always stays alone on its line. */
+export function linkView(url: string, note?: string): View {
+  return {
+    text: () => (note ? `${note}\n${url}` : url),
+    json: () => ({ url, ...(note ? { note } : {}) }),
+  };
 }

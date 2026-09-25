@@ -108,4 +108,21 @@ describe('selectKey', () => {
     const result = selectKey([key()], 'acme', 'web', {}, ORIGIN);
     expect(result.ok).toBe(true);
   });
+
+  it('throws (malformed) rather than trust a crafted, non-integer projectID into the request path (should-fix 3)', () => {
+    const crafted = key({ projectID: '42/../../admin/users' });
+    expect(() => selectKey([crafted], 'acme', 'web', {}, ORIGIN)).toThrow(TypeError);
+  });
+
+  it('throws (malformed) on a negative or non-integer projectID', () => {
+    expect(() => selectKey([key({ projectID: -1 })], 'acme', 'web', {}, ORIGIN)).toThrow(TypeError);
+    expect(() => selectKey([key({ projectID: 1.5 })], 'acme', 'web', {}, ORIGIN)).toThrow(
+      TypeError,
+    );
+  });
+
+  it('throws (malformed) on a public id that is not a uuid (should-fix 3)', () => {
+    const crafted = key({ public: 'not-a-uuid' });
+    expect(() => selectKey([crafted], 'acme', 'web', {}, ORIGIN)).toThrow(TypeError);
+  });
 });

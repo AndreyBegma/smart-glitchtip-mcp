@@ -22,10 +22,20 @@ describe('toolset registry (acceptance 15)', () => {
     expect(TOOLSETS.find((t) => t.name === 'organizations')?.available).toBe(true);
   });
 
-  it('every available toolset contributes at least one controller', () => {
+  // The general rule is "every available toolset has a read tool" (a mistaken
+  // empty `read` must still fail this). `ingest` is the one deliberate
+  // exception: both its tools are writes (send_test_event,
+  // send_test_security_report), by the spec's own design.
+  const WRITE_ONLY = new Set<ToolsetName>(['ingest']);
+
+  it('every available toolset contributes at least one read tool, except the write-only exemption', () => {
     for (const toolset of TOOLSETS) {
-      if (toolset.available) {
-        expect(toolset.read.length + toolset.write.length, toolset.name).toBeGreaterThan(0);
+      if (!toolset.available) continue;
+      if (WRITE_ONLY.has(toolset.name)) {
+        expect(toolset.read, toolset.name).toEqual([]);
+        expect(toolset.write.length, toolset.name).toBeGreaterThan(0);
+      } else {
+        expect(toolset.read.length, toolset.name).toBeGreaterThan(0);
       }
     }
   });

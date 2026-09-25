@@ -34,7 +34,9 @@ resolved instance (D-03, AGENTS.md rule 9). Before it sends anything:
    - a key that answers `isActive: false`: `Key <id> is inactive.`, no send. A key response that
      omits the field counts as active.
 3. It sends to `<resolved instance origin>/api/<projectID>/store-or-security/?sentry_key=<public>`
-   — `projectID` and `public` come from the keys response, never the caller's `dsn`.
+   — `projectID` and `public` come from the keys response, never the caller's `dsn`. Both are
+   checked before use (a positive integer, a uuid); a keys response that does not shape them this
+   way is `isError` ("did not expect"), never trusted into the request path or query string.
 
 The API token still travels as `Authorization` on every call, including the ingest POST (it is
 the same origin that header already authenticates against, and the DSN key takes precedence for
@@ -64,20 +66,25 @@ tags: { "smart-glitchtip-mcp": "test" }, environment?, release? }` to the store 
 |---|---|
 | 200 `{event_id}` | success: "Accepted: event `<id>` via key `<key id>` (project `<projectID>`)." |
 | 401 | `isError`: the DSN key was rejected (unknown or inactive; GlitchTip remembers a rejection for 30 s) |
+| 403 | `isError`: "The DSN key does not have permission to send to project `<projectID>` (403)." — never mentions the server's own token |
 | 422 | `isError`: "GlitchTip refused the event as malformed: `<detail>`." |
 | 429 | `isError`: throttled, not retried |
 | 503 | `isError`: "Ingest is paused on this instance (maintenance)." |
 | other | the foundation's mapping |
 
-A 200 whose body has no string `event_id` is still a success, with a note that the reply was not
-in the expected shape.
+A 200 whose body's `event_id` is not the 32-hex form this server sent (or literally the id sent)
+is still a success — the reply is read, and its `event_id` is not, when it is not one this server
+recognises as the event it just sent — with a note that the reply was not in the expected shape.
 
 With `wait_seconds > 0`, polls `GET
 /api/0/projects/{organization_slug}/{project_slug}/events/{event_id}/` every 2 s (event id in
 canonical dashed form) until it answers 200 or the deadline passes, and appends either "Processed:
 the event is visible (issue `<groupID>`)." or "Accepted but not visible after `<n>` s. The worker
-may be behind; this is not a DSN failure." A 403 on the poll says the token cannot read events and
-leaves the send's own success intact.
+may be behind; this is not a DSN failure." Each poll attempt's own timeout is bounded to what is
+left of `wait_seconds` (floored at 100 ms), so a slow poll cannot itself run longer than the budget
+the caller asked for; a per-attempt timeout or transport failure stops polling the same way running
+out of `wait_seconds` does. A 401 or 403 on the poll means the server's own token was rejected or
+cannot read events — not that the DSN key failed — and leaves the send's own success intact.
 
 ## `send_test_security_report`
 

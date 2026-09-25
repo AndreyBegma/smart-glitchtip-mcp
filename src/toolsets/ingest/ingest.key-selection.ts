@@ -54,7 +54,25 @@ function isActive(key: RawProjectKey): boolean {
   return key.isActive !== false;
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `projectID` and `public` go straight into the ingest request path and
+ * query string (`/api/<projectID>/store/?sentry_key=<public>`, unescaped).
+ * A response that does not shape them as a positive integer and a uuid is
+ * `malformed` — never trusted into the path (a crafted projectID could
+ * otherwise rewrite the request onto a different API route, still carrying
+ * the server's token).
+ */
 function toPickedKey(key: RawProjectKey): PickedKey {
+  if (!Number.isSafeInteger(key.projectID) || key.projectID <= 0) {
+    throw new TypeError(
+      `GlitchTip returned a client key whose projectID is not a positive integer: ${JSON.stringify(key.projectID)}.`,
+    );
+  }
+  if (typeof key.public !== 'string' || !UUID_PATTERN.test(key.public)) {
+    throw new TypeError('GlitchTip returned a client key whose public id is not a uuid.');
+  }
   return { id: key.id, label: keyLabel(key), public: key.public, projectID: key.projectID };
 }
 

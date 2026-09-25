@@ -68,9 +68,9 @@ const CSP_REPORT_BODY = {
   },
 };
 
-function storeEventPayload(eventId: string, args: z.infer<typeof sendTestEventArgs>) {
+function storeEventPayload(hexEventId: string, args: z.infer<typeof sendTestEventArgs>) {
   return {
-    event_id: eventId.replace(/-/g, ''),
+    event_id: hexEventId,
     timestamp: new Date().toISOString(),
     platform: 'other',
     level: args.level,
@@ -133,11 +133,12 @@ export class IngestMutations {
     if (!picked.ok) return error(picked.message);
 
     const eventId = randomUUID();
+    const hexEventId = eventId.replace(/-/g, '');
     const response = await glitchtip.client.raw(
       { name: 'send test event', scopes: [] },
       'POST',
       `/api/${picked.key.projectID}/store/`,
-      { query: { sentry_key: picked.key.public }, body: storeEventPayload(eventId, args) },
+      { query: { sentry_key: picked.key.public }, body: storeEventPayload(hexEventId, args) },
     );
 
     const failure = ingestOutcomeMessage(
@@ -148,7 +149,7 @@ export class IngestMutations {
     );
     if (failure) return error(withHostNote(failure, picked.dsnHostMismatch));
 
-    const returnedId = parseEventId(response.text);
+    const returnedId = parseEventId(response.text, hexEventId);
     const lines = [
       returnedId
         ? `Accepted: event ${returnedId} via key ${picked.key.id} (project ${picked.key.projectID}).`

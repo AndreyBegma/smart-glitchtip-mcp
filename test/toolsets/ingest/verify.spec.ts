@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../../../src/config/config';
 import type { GlitchTipClient } from '../../../src/glitchtip/glitchtip.client';
 import { InstanceResolver } from '../../../src/glitchtip/instance.resolver';
@@ -62,5 +62,47 @@ describe('verifyEventVisible', () => {
     );
     expect(message).toContain('cannot read events');
     expect(message).toContain('succeeded');
+  });
+
+  it('reports a 401 on the poll as the server’s own token, not the DSN key (should-fix 8)', async () => {
+    const mock = new MockGlitchTip().json('GET', EVENT_URL, {}, { status: 401 });
+    const message = await verifyEventVisible(
+      clientFor(mock),
+      'acme',
+      'web',
+      'e1',
+      4,
+      async () => undefined,
+    );
+    expect(message).toContain("server's own token");
+    expect(message).toContain('succeeded');
+  });
+
+  it('bounds each attempt’s timeoutMs to the remaining wait_seconds budget (should-fix 8)', async () => {
+    const mock = new MockGlitchTip().json('GET', EVENT_URL, {}, { status: 404 });
+    const client = clientFor(mock);
+    const rawSpy = vi.spyOn(client, 'raw');
+    await verifyEventVisible(client, 'acme', 'web', 'e1', 1, async () => undefined);
+    expect(rawSpy).toHaveBeenCalledTimes(1);
+    const options = rawSpy.mock.calls[0][3];
+    expect(options?.timeoutMs).toBeGreaterThanOrEqual(100);
+    expect(options?.timeoutMs).toBeLessThanOrEqual(1000);
+  });
+
+  it('a per-attempt failure (timeout/transport) stops polling instead of throwing (should-fix 8)', async () => {
+    const mock = new MockGlitchTip().on('GET', EVENT_URL, () => {
+      throw new TypeError('fetch failed');
+    });
+    const message = await verifyEventVisible(
+      clientFor(mock),
+      'acme',
+      'web',
+      'e1',
+      4,
+      async () => undefined,
+    );
+    expect(message).toBe(
+      'Accepted but not visible after 4 s. The worker may be behind; this is not a DSN failure.',
+    );
   });
 });

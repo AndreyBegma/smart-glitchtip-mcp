@@ -37,8 +37,21 @@ before every Stripe call.
   work on self-hosted instances too, over a rolling 30-day window.
 - The settings response is malformed, or the call itself fails: every tool **degrades** — it
   proceeds with the Stripe call and adds "Could not confirm whether billing is enabled on this
-  instance." It never answers "Internal error".
+  instance." It never answers "Internal error". For `create_checkout_link` and
+  `create_billing_portal_link` this note is placed on its own line **above** the URL in text
+  output (the URL always stays alone on its own line); `format: "json"` carries it as a `note`
+  field alongside `url`. Every other gated tool appends the note after its normal output.
 - `get_instance_settings` skips the gate: it is the gate's own route.
+
+Every GlitchTip response this toolset reads is checked against its expected shape before
+rendering (numbers where numbers are required, known enum values for `status`/`collectionMethod`):
+a response that does not match — `{}` for an overage or usage endpoint, for example — is
+`isError` ("did not expect"), never rendered as `$NaN` or as an empty-looking success. Stripe's
+free-form `stripeID` and price `interval` values are fenced as untrusted text in `text` output
+alongside the product/plan name and description (they are configured by whoever administers the
+Stripe account, not by this server's operator); `status` is checked against GlitchTip's own
+`SubscriptionStatus` enum instead, so an unexpected value fails closed rather than being rendered
+verbatim.
 
 ## Untrusted text
 
@@ -146,7 +159,9 @@ Turn metered overage billing on or off for an organization.
 | `format` | `"text"` \| `"json"` | `text` |
 
 A missing or wrong `confirm`, or `cap_cents`/`confirm` sent with `enabled: false`, is a validation
-error before any request. Output: the status, as `get_overage_status`.
+error before any request. Disabling always sends `capCents: 0` to GlitchTip — the spend cap resets
+to 0, and re-enabling later always needs a fresh `cap_cents`. Output: the status, as
+`get_overage_status`.
 
 ## `create_checkout_link`
 
@@ -173,7 +188,8 @@ invoices and cancellation. Owner only, not idempotent.
 | `organization` | slug | the default organization |
 | `format` | `"text"` \| `"json"` | `text` |
 
-Output and response check as `create_checkout_link`.
+Output and response check as `create_checkout_link` (the `isError` wording for a bad `url` says
+"billing-portal response", not "checkout response").
 
 ## `subscribe_free_plan`
 

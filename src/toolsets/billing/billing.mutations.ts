@@ -15,7 +15,13 @@ import { GlitchTipTools } from '../../mcp/toolset.decorators';
 import { linkView, overageStatusView, subscriptionView } from './billing.format';
 import { BILLING_UNKNOWN_NOTE, billingDisabledSentence, fetchBillingEnabled } from './billing.gate';
 import { capCentsParam, priceIdParam, STRIPE_UNTRUSTED_SENTENCE } from './billing.params';
-import { asOwnerCall } from './billing-errors';
+import {
+  createSubscriptionResponseSchema,
+  linkSessionSchema,
+  overageStatusSchema,
+  parseOrMalformed,
+} from './billing.validate';
+import { asMemberCall, asOwnerCall } from './billing-errors';
 
 // Registered only when GLITCHTIP_READ_ONLY=false (D-07); see toolset.registry.
 
@@ -80,7 +86,8 @@ export class BillingMutations {
     name: 'set_overage_billing',
     description:
       'Turn metered overage billing on or off for an organization. When on, events beyond the ' +
-      'plan quota are billed up to the spend cap instead of being dropped. Owner only.',
+      'plan quota are billed up to the spend cap instead of being dropped. Disabling resets the ' +
+      'spend cap to 0; re-enabling always needs a new cap_cents. Owner only.',
     parameters: setOverageArgs,
     annotations: {
       title: 'Set overage billing',
@@ -96,7 +103,7 @@ export class BillingMutations {
     if (enabled === false) {
       return error(billingDisabledSentence(glitchtip.instance.origin));
     }
-    const status = await asOwnerCall(
+    const raw = await asOwnerCall(
       glitchtip.client.call({ name: 'set overage billing', scopes: [] }, (api) =>
         api.POST('/api/0/stripe/organizations/{organization_slug}/overage/', {
           params: { path: { organization_slug: args.organization } },
@@ -105,9 +112,14 @@ export class BillingMutations {
       ),
       args.organization,
     );
+    const status = parseOrMalformed(overageStatusSchema, raw);
     return this.output.render(
       args.format,
-      overageStatusView(status, args.organization),
+      overageStatusView(
+        status,
+        args.organization,
+        enabled === undefined ? BILLING_UNKNOWN_NOTE : undefined,
+      ),
       'set overage billing',
     );
   }
@@ -134,7 +146,7 @@ export class BillingMutations {
     if (enabled === false) {
       return error(billingDisabledSentence(glitchtip.instance.origin));
     }
-    const session = await asOwnerCall(
+    const raw = await asOwnerCall(
       glitchtip.client.call({ name: 'create checkout link', scopes: [] }, (api) =>
         api.POST(
           '/api/0/stripe/organizations/{organization_slug}/create-stripe-subscription-checkout/',
@@ -146,10 +158,14 @@ export class BillingMutations {
       ),
       org,
     );
+    const session = parseOrMalformed(linkSessionSchema, raw);
     if (!isAbsoluteHttpsUrl(session.url)) {
       return error('GlitchTip returned an unexpected checkout response');
     }
-    return this.output.render(args.format, linkView(session.url));
+    return this.output.render(
+      args.format,
+      linkView(session.url, enabled === undefined ? BILLING_UNKNOWN_NOTE : undefined),
+    );
   }
 
   @Tool({
@@ -174,7 +190,7 @@ export class BillingMutations {
     if (enabled === false) {
       return error(billingDisabledSentence(glitchtip.instance.origin));
     }
-    const session = await asOwnerCall(
+    const raw = await asOwnerCall(
       glitchtip.client.call({ name: 'create billing portal link', scopes: [] }, (api) =>
         api.POST('/api/0/stripe/organizations/{organization_slug}/create-billing-portal/', {
           params: { path: { organization_slug: org } },
@@ -182,10 +198,14 @@ export class BillingMutations {
       ),
       org,
     );
+    const session = parseOrMalformed(linkSessionSchema, raw);
     if (!isAbsoluteHttpsUrl(session.url)) {
-      return error('GlitchTip returned an unexpected checkout response');
+      return error('GlitchTip returned an unexpected billing-portal response');
     }
-    return this.output.render(args.format, linkView(session.url));
+    return this.output.render(
+      args.format,
+      linkView(session.url, enabled === undefined ? BILLING_UNKNOWN_NOTE : undefined),
+    );
   }
 
   @Tool({
@@ -210,7 +230,7 @@ export class BillingMutations {
     if (enabled === false) {
       return error(billingDisabledSentence(glitchtip.instance.origin));
     }
-    const organizationDetail = await asOwnerCall(
+    const organizationDetail = await asMemberCall(
       glitchtip.client.call({ name: 'get organization', scopes: [] }, (api) =>
         api.GET('/api/0/organizations/{organization_slug}/', {
           params: { path: { organization_slug: org } },
@@ -218,7 +238,7 @@ export class BillingMutations {
       ),
       org,
     );
-    const created = await asOwnerCall(
+    const raw = await asOwnerCall(
       glitchtip.client.call({ name: 'subscribe to plan', scopes: [] }, (api) =>
         api.POST('/api/0/stripe/subscriptions/', {
           body: { price: args.price, organization: organizationDetail.id },
@@ -226,6 +246,7 @@ export class BillingMutations {
       ),
       org,
     );
+    const created = parseOrMalformed(createSubscriptionResponseSchema, raw);
     return this.output.render(
       args.format,
       subscriptionView(

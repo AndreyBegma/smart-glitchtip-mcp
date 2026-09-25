@@ -17,6 +17,8 @@ const TOKEN = 'tok_TEST';
 const KEYS_URL = `${API}/projects/acme/web/keys/`;
 const STORE_URL = `${GLITCHTIP}/api/42/store/`;
 const SECURITY_URL = `${GLITCHTIP}/api/42/security/`;
+/** A syntactically valid 32-hex event id — parseEventId accepts this shape regardless of the id actually sent. */
+const FAKE_EVENT_ID = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 const KEY = {
   name: null,
@@ -103,19 +105,35 @@ describe('ingest toolset registration', () => {
 
 describe('send_test_event', () => {
   it('routes to the resolved instance with sentry_key and projectID from the keys response', async () => {
-    const mock = keysMock(KEY).on('POST', STORE_URL, jsonResponse({ event_id: 'evt123' }, 200));
+    const mock = keysMock(KEY).on(
+      'POST',
+      STORE_URL,
+      jsonResponse({ event_id: FAKE_EVENT_ID }, 200),
+    );
     const { text, isError } = await call(mock, 'send_test_event', {
       organization: 'acme',
       project: 'web',
     });
     expect(isError).toBe(false);
-    expect(text).toBe(`Accepted: event evt123 via key ${KEY.id} (project 42).`);
+    expect(text).toBe(`Accepted: event ${FAKE_EVENT_ID} via key ${KEY.id} (project 42).`);
     const store = mock.requests.find((r) => r.url.pathname === '/api/42/store/');
     expect(store?.url.searchParams.get('sentry_key')).toBe(KEY.public);
     const body = JSON.parse(store?.body ?? '{}');
     expect(body.logger).toBe('smart-glitchtip-mcp');
     expect(body.tags).toEqual({ 'smart-glitchtip-mcp': 'test' });
     expect(body.event_id).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it('a crafted projectID never reaches the request path: malformed, no ingest request (should-fix 3)', async () => {
+    const crafted = { ...KEY, projectID: '42/../../admin/users' };
+    const mock = new MockGlitchTip().json('GET', KEYS_URL, [crafted]);
+    const { isError, text } = await call(mock, 'send_test_event', {
+      organization: 'acme',
+      project: 'web',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('did not expect');
+    expect(mock.requests.filter((r) => r.method === 'POST')).toHaveLength(0);
   });
 
   it('selects the key by key_id', async () => {
@@ -128,7 +146,7 @@ describe('send_test_event', () => {
     const mock = keysMock(KEY, other).on(
       'POST',
       STORE_URL,
-      jsonResponse({ event_id: 'evt1' }, 200),
+      jsonResponse({ event_id: FAKE_EVENT_ID }, 200),
     );
     const { isError, text } = await call(mock, 'send_test_event', {
       organization: 'acme',
@@ -166,7 +184,11 @@ describe('send_test_event', () => {
   });
 
   it('a dsn naming another host still sends to the resolved instance, with the mismatch noted', async () => {
-    const mock = keysMock(KEY).on('POST', STORE_URL, jsonResponse({ event_id: 'evt1' }, 200));
+    const mock = keysMock(KEY).on(
+      'POST',
+      STORE_URL,
+      jsonResponse({ event_id: FAKE_EVENT_ID }, 200),
+    );
     const { isError, text } = await call(mock, 'send_test_event', {
       organization: 'acme',
       project: 'web',
@@ -186,6 +208,18 @@ describe('send_test_event', () => {
       project: 'web',
       key_id: KEY.id,
       dsn: `https://${KEY.public}@glitchtip.test/42`,
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('Invalid parameters');
+    expect(mock.requests).toHaveLength(0);
+  });
+
+  it('a dsn with a malformed percent-escape is a normal validation error, not a crash (blocker 2)', async () => {
+    const mock = keysMock(KEY);
+    const { isError, text } = await call(mock, 'send_test_event', {
+      organization: 'acme',
+      project: 'web',
+      dsn: 'https://%@glitchtip.test/42',
     });
     expect(isError).toBe(true);
     expect(text).toContain('Invalid parameters');
@@ -225,6 +259,17 @@ describe('send_test_event', () => {
     expect(text).toBe('Ingest is paused on this instance (maintenance).');
   });
 
+  it('403: names the key/project, never the API token (should-fix 7)', async () => {
+    const mock = keysMock(KEY).on('POST', STORE_URL, jsonResponse({}, 403));
+    const { isError, text } = await call(mock, 'send_test_event', {
+      organization: 'acme',
+      project: 'web',
+    });
+    expect(isError).toBe(true);
+    expect(text).toBe(`The DSN key does not have permission to send to project 42 (403).`);
+    expect(text).not.toContain('token');
+  });
+
   it('422: malformed, with the detail passed through', async () => {
     const mock = keysMock(KEY).on(
       'POST',
@@ -250,15 +295,38 @@ describe('send_test_event', () => {
     expect(text).toContain('not in the expected shape');
   });
 
-  it('never leaks the API token or a legacy DSN secret', async () => {
-    const mock = keysMock(KEY).on('POST', STORE_URL, jsonResponse({}, 401));
-    const { text } = await call(mock, 'send_test_event', {
+  it('a 200 event_id that is neither 32-hex nor the id sent reads as not in the expected shape (should-fix 4)', async () => {
+    const mock = keysMock(KEY).on(
+      'POST',
+      STORE_URL,
+      jsonResponse({ event_id: 'evt123-not-hex' }, 200),
+    );
+    const { isError, text } = await call(mock, 'send_test_event', {
       organization: 'acme',
       project: 'web',
-      dsn: `https://${KEY.public}:SECRET_DSN_PART@glitchtip.test/42`,
     });
-    expect(text).not.toContain('tok_TEST');
+    expect(isError).toBe(false);
+    expect(text).not.toContain('evt123-not-hex');
+    expect(text).toContain('not in the expected shape');
+  });
+
+  it('never leaks the API token or a legacy DSN secret, in the result or the logs', async () => {
+    const mock = keysMock(KEY).on('POST', STORE_URL, jsonResponse({}, 401));
+    const { text } = await call(
+      mock,
+      'send_test_event',
+      {
+        organization: 'acme',
+        project: 'web',
+        dsn: `https://${KEY.public}:SECRET_DSN_PART@glitchtip.test/42`,
+      },
+      { GLITCHTIP_TOKEN: 'tok_SECRET_123' },
+    );
+    expect(text).not.toContain('tok_SECRET_123');
     expect(text).not.toContain('SECRET_DSN_PART');
+    const logs = booted?.logs() ?? '';
+    expect(logs).not.toContain('tok_SECRET_123');
+    expect(logs).not.toContain('SECRET_DSN_PART');
   });
 
   it('verifies with wait_seconds: the mock answers 404 then 200, and the result says Processed', async () => {
@@ -266,7 +334,7 @@ describe('send_test_event', () => {
     const fixedEventId = '22222222-2222-4222-8222-222222222222';
     vi.mocked(nodeRandomUUID).mockReturnValue(fixedEventId as ReturnType<typeof nodeRandomUUID>);
     const mock = keysMock(KEY)
-      .on('POST', STORE_URL, jsonResponse({ event_id: 'evt1' }, 200))
+      .on('POST', STORE_URL, jsonResponse({ event_id: FAKE_EVENT_ID }, 200))
       .on(
         'GET',
         `${API}/projects/acme/web/events/${fixedEventId}/`,

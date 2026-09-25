@@ -57,6 +57,12 @@ export function ingestFailureOutcome(
   if (status === 503) {
     return { isError: true, message: 'Ingest is paused on this instance (maintenance).' };
   }
+  if (status === 403) {
+    return {
+      isError: true,
+      message: `The DSN key does not have permission to send to project ${projectID} (403).`,
+    };
+  }
   return undefined;
 }
 
@@ -81,15 +87,20 @@ function detailOf(response: RawResponse): string {
   return typeof body === 'string' && body !== '' ? body : 'status 422';
 }
 
-/** The store route's 200 body: `{event_id}` is all this server reads (D-12). */
-export function parseEventId(text: string): string | undefined {
+const EVENT_ID_HEX_32 = /^[0-9a-f]{32}$/i;
+
+/**
+ * The store route's 200 body: `{event_id}` is all this server reads (D-12).
+ * Accepted only when it is the 32-hex-character form this server sends, or
+ * literally the id sent (a GlitchTip that echoes it back in another
+ * notation) — anything else is not read as "the" event id, so an agent is
+ * never handed text GlitchTip did not actually generate for this event.
+ */
+export function parseEventId(text: string, sentEventId?: string): string | undefined {
   const body = parsedBody(text);
-  if (
-    body &&
-    typeof body === 'object' &&
-    typeof (body as { event_id?: unknown }).event_id === 'string'
-  ) {
-    return (body as { event_id: string }).event_id;
-  }
+  if (!body || typeof body !== 'object') return undefined;
+  const eventId = (body as { event_id?: unknown }).event_id;
+  if (typeof eventId !== 'string') return undefined;
+  if (EVENT_ID_HEX_32.test(eventId) || eventId === sentEventId) return eventId;
   return undefined;
 }
