@@ -1,0 +1,15 @@
+{
+  "id": 1,
+  "name": "API health",
+  "monitorType": "GET",
+  "isUp": true,
+  "lastChange": "2026-01-01T00:00:00Z",
+  "url": "https://api.example.test/health",
+  "expectedStatus": 200,
+  "interval": 60,
+  "confirmationThreshold": 1,
+  "projectID": null,
+  "organizationID": 42,
+  "heartbeatEndpoint": null,
+  "created": "2025-12-01T00:00:00Z"
+}
