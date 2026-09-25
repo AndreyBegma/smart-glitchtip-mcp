@@ -80,7 +80,19 @@ Organization members, teams and invitations are not in this toolset — see
   returned, so a token GlitchTip echoes inside a rendered field (a name, a URL)
   reads `[redacted]`. `get_instance_license` also scrubs the license key it
   learned from the support link, from its result and from the license call's
-  error details.
+  error details — in every form it can be written: as it stands in the link
+  (`AB+CD`), decoded (`AB CD`), re-encoded (`AB%20CD`), each bare and
+  `sub=`-prefixed, and the whole fragment.
+- **Short license keys.** The client's redactor skips extra secrets under 8
+  characters. For a key of 4–7 characters, the tool's own render scrubs the
+  bare forms from its result, and the `sub=`-prefixed forms (8 or more) are
+  scrubbed from error details by the client too; the bare form of such a key
+  in an *error* detail is not. A key under 4 characters is scrubbed only in
+  its `sub=` form: replacing 1–3 characters everywhere would erase ordinary
+  text.
+- **Dates.** A date renders only when GlitchTip sent an ISO 8601 date-time;
+  anything else is a gap (`?`), never cut to its first ten characters — a cut
+  before redaction could leave the start of a secret that no longer matches.
 - **Untrusted data (D-18).** The user's name, e-mail addresses and option
   strings are fenced as `glitchtip-user`; identity providers, SSO app names,
   URLs and client IDs, and the license tool's billing e-mail and support URL,
@@ -127,19 +139,23 @@ Whether new projects notify the current user by default
 `project <id>: on|off`. Projects without an override follow the default and are
 not listed. A status GlitchTip reports other than 0 or 1 renders
 `status <n>`. If the overrides read fails, the result is still a success with
-the first part and the line `Per-project overrides unavailable: <message>`.
+the first part and the line `Per-project overrides unavailable: <message>`; the
+message can quote GlitchTip's detail, so it is flattened and fenced as
+`external`. The `json` view gives only the error kind (`overridesUnavailable`).
 
 ## `get_instance_license`
 
 The instance's billing e-mail (or `none`), `support license: configured` when
 the support link carries a license fragment (else `not configured`), and the
-support URL **with the fragment removed** — GlitchTip appends the license key
-as `#sub=<key>`, a credential for the vendor's support portal. The key never
-appears in any output; open the personalised link from the GlitchTip UI.
+support URL as **origin and path only** — no query, no fragment. GlitchTip
+appends the license key as `#sub=<key>`, a credential for the vendor's support
+portal. The key never appears in any output; open the personalised link from
+the GlitchTip UI. A URL that does not parse is withheld (`?`).
 
 If the support-link read fails, the result still succeeds with
-`support license: unknown (support link unavailable: <message>)`; if the
-license read fails, the tool fails.
+`support license: unknown (support link unavailable: <message>)`, the message
+fenced as `external` (json: `supportLinkUnavailable` holds the error kind); if
+the license read fails, the tool fails.
 
 ## `list_social_apps`
 
@@ -162,10 +178,10 @@ Change the current user's display name or preferences.
 | Input | Type | Default |
 |---|---|---|
 | `name` | string 1–255, or `null` to clear | unchanged |
-| `timezone` | non-empty string | unchanged |
-| `language` | non-empty string | unchanged |
+| `timezone` | string 1–255 | unchanged |
+| `language` | string 1–255 | unchanged |
 | `clock_24_hours` | boolean | unchanged |
-| `preferred_theme` | non-empty string | unchanged |
+| `preferred_theme` | string 1–255 | unchanged |
 
 At least one is required; with none the call is refused before any request.
 
@@ -176,7 +192,9 @@ clock24Hours, preferredTheme } }` with the current values and the requested
 changes; `stacktraceOrder` is not an input but is always re-sent. A field the
 tool must re-send that the read lacks (or holds with the wrong type) refuses
 the write before the `PUT` — `null` counts as a value, a missing key does not
-(AGENTS.md rule 15). The read and the write are not atomic: a concurrent edit
+(AGENTS.md rule 15). The same holds the other way: a stored `options` key this
+server does not know would be dropped by the whole-object `PUT`, so it refuses
+too (naming the key only when it is a plain identifier). The read and the write are not atomic: a concurrent edit
 between them is lost.
 
 Output: the user as returned by the `PUT`, in `get_current_user` shape.

@@ -3,7 +3,7 @@ import { AgentFacingError } from '../../agent-facing.error';
 import type { OutputFormat, ToolOutput, View } from '../../format/tool-output';
 import { GlitchTipError, type Operation } from '../../glitchtip/glitchtip.errors';
 import type { GlitchTipConnection } from '../../glitchtip/instance.resolver';
-import type { Redactor } from '../../glitchtip/redactor';
+import { REDACTED } from '../../glitchtip/redactor';
 
 // What the admin toolset tells GlitchTip it is doing, and how its failures
 // read (spec "Errors"). No `/users/…` route checks a scope [Confirmed:
@@ -72,13 +72,24 @@ export interface AdminRender {
   readonly extraSecrets?: readonly string[];
 }
 
+/**
+ * The shortest extra secret this toolset scrubs itself. The foundation's
+ * redactor skips extras under 8 characters as too common to scrub; a license
+ * key is never "common", so forms of 4–7 characters are replaced here too.
+ * Shorter than 4 would erase ordinary text and is left alone — a key that
+ * short is also caught in its `sub=`-prefixed form, which is 8 or more.
+ */
+const SHORTEST_LOCAL_SECRET = 4;
+
 /** Every admin result goes out through here: rendered, bounded and scrubbed. */
 export function renderRedacted(
   output: ToolOutput,
-  { glitchtip, format, view, tool, extraSecrets }: AdminRender,
+  { glitchtip, format, view, tool, extraSecrets = [] }: AdminRender,
 ): CallToolResult {
   const redactor = glitchtip.instance.redactor(extraSecrets);
-  return output.render(format, redactedView(view, redactor), tool);
+  const short = extraSecrets.filter((s) => s.length >= SHORTEST_LOCAL_SECRET);
+  const scrub = (text: string) => withoutEach(redactor.redact(text), short);
+  return output.render(format, redactedView(view, scrub), tool);
 }
 
 /**
@@ -87,23 +98,30 @@ export function renderRedacted(
  * The allowlists keep secret *fields* out; this keeps a secret GlitchTip
  * echoes inside a rendered field (a name, a URL) out as well.
  */
-function redactedView(view: View, redactor: Redactor): View {
+function redactedView(view: View, scrub: (text: string) => string): View {
   return {
     untrusted: view.untrusted,
-    text: () => redactor.redact(view.text()),
-    json: () => redactedValue(view.json(), redactor),
+    text: () => scrub(view.text()),
+    json: () => redactedValue(view.json(), scrub),
   };
 }
 
-function redactedValue(value: unknown, redactor: Redactor): unknown {
-  if (typeof value === 'string') return redactor.redact(value);
-  if (Array.isArray(value)) return value.map((item) => redactedValue(item, redactor));
+function redactedValue(value: unknown, scrub: (text: string) => string): unknown {
+  if (typeof value === 'string') return scrub(value);
+  if (Array.isArray(value)) return value.map((item) => redactedValue(item, scrub));
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, redactedValue(item, redactor)]),
+      Object.entries(value).map(([key, item]) => [key, redactedValue(item, scrub)]),
     );
   }
   return value;
+}
+
+/** Longest first, so a secret containing another is replaced whole. */
+function withoutEach(text: string, secrets: readonly string[]): string {
+  return [...secrets]
+    .sort((a, b) => b.length - a.length)
+    .reduce((result, secret) => result.split(secret).join(REDACTED), text);
 }
 
 /** Confirmation of a write with nothing richer to show (D-12). */

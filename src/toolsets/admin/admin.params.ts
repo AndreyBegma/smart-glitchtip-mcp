@@ -30,4 +30,4 @@ export const userNameParam = z
   .nullable()
   .describe('Display name (1–255 characters); null clears it.');
 
-export const userOptionParam = z.string().min(1);
+export const userOptionParam = z.string().min(1).max(NAME_MAX);

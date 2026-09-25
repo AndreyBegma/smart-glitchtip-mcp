@@ -25,6 +25,8 @@ const OPTIONS: readonly (readonly [keyof UserOptions, Kind, keyof UserChanges | 
   ['preferredTheme', 'string', 'preferred_theme'],
 ];
 
+const OPTION_KEYS: ReadonlySet<string> = new Set(OPTIONS.map(([key]) => key));
+
 /**
  * The `PUT /users/me/` body: the stored user with `changes` applied. `UserIn`
  * is applied whole — every key of `options`, unset ones as null [Confirmed:
@@ -39,6 +41,8 @@ export function userUpdateBody(stored: unknown, changes: UserChanges): UserIn {
   const name =
     changes.name !== undefined ? changes.name : (kept(stored, 'name', 'string') as string | null);
   if (!isFields(stored.options)) refuse('options');
+  const unknown = Object.keys(stored.options).find((key) => !OPTION_KEYS.has(key));
+  if (unknown !== undefined) refuseUnknown(unknown);
   const options: Record<string, unknown> = {};
   for (const [key, kind, input] of OPTIONS) {
     const change = input === undefined ? undefined : changes[input];
@@ -54,6 +58,22 @@ function kept(record: Fields, key: string, kind: Kind, label = key): unknown {
   if (value !== null && typeof value !== kind) refuse(label);
   return value;
 }
+
+/**
+ * The PUT replaces `options` whole, so a stored key this server does not know
+ * would be dropped by the write — rule 15 the other way round.
+ */
+function refuseUnknown(key: string): never {
+  // The key is GlitchTip's text: named only when it is a plain identifier.
+  const named = PLAIN_KEY.test(key) ? `\`options.${key}\`` : 'an option';
+  throw new AdminRefusal(
+    `Not updated: GlitchTip's read of the current user has ${named} this server does not ` +
+      'know; the update replaces options whole and would drop it. Nothing was written. ' +
+      'Change it in the GlitchTip UI.',
+  );
+}
+
+const PLAIN_KEY = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 
 function refuse(field: string): never {
   throw new AdminRefusal(

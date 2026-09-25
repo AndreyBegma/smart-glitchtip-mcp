@@ -202,5 +202,16 @@ describe('admin token safety', () => {
     expect([...tools].filter((path) => WITHHELD_PATH.test(path))).toEqual([]);
     expect(WITHHELD_PATH.test('/api/0/api-tokens/')).toBe(true);
     expect(WITHHELD_PATH.test('/api/0/accept/1/abc/')).toBe(true);
+    // User deletion and every e-mail change are withheld too (D-23): the user is never
+    // deleted, and the e-mail route is only ever read.
+    const calls = allRequests.map((r) => `${r.method} ${r.url.pathname}`);
+    expect(calls).not.toContain('DELETE /api/0/users/me/');
+    const emailCalls = allRequests.filter((r) =>
+      r.url.pathname.startsWith('/api/0/users/me/emails'),
+    );
+    expect(emailCalls.length).toBeGreaterThan(0);
+    expect(
+      emailCalls.every((r) => r.method === 'GET' && r.url.pathname === '/api/0/users/me/emails/'),
+    ).toBe(true);
   });
 });

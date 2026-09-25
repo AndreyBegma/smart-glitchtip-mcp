@@ -100,7 +100,10 @@ describe('get_notification_settings', () => {
       .json('GET', URLS.alerts, [1, 2]);
     const out = await call(mock, 'get_notification_settings');
     expectDegraded(out);
-    expect(out.text).toContain('Per-project overrides unavailable: the response was not an object');
+    expect(out.text).toContain(
+      'Per-project overrides unavailable: <untrusted source="external" field="overrides.error">' +
+        'the response was not an object',
+    );
   });
 
   it('structural break: a list instead of the settings is `malformed`', async () => {
@@ -124,7 +127,7 @@ describe('get_instance_license', () => {
       [
         'billing email: ?',
         'support license: unknown',
-        'support URL: ? (missing from the response)',
+        'support URL: ? (missing or unparsable in the response)',
       ].join('\n'),
     );
   });

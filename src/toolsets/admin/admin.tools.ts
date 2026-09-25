@@ -182,15 +182,18 @@ export class AdminTools {
 }
 
 /**
- * A GlitchTip failure of a secondary read, kept as its agent-facing message.
- * That message can quote GlitchTip's detail, and here it lands inside a
- * successful result, so it is flattened to one line.
+ * A GlitchTip failure of a secondary read, kept as its kind and agent-facing
+ * message. That message can quote GlitchTip's detail, and here it lands
+ * inside a successful result, so it is flattened to one line (and fenced by
+ * the view).
  */
 async function optional<T>(call: Promise<T>): Promise<Optional<T>> {
   try {
     return { ok: true, value: await call };
   } catch (err) {
-    if (err instanceof GlitchTipError) return { ok: false, reason: flatten(err.message) };
+    if (err instanceof GlitchTipError) {
+      return { ok: false, kind: err.kind, reason: flatten(err.message) };
+    }
     throw err;
   }
 }

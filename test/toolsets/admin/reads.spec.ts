@@ -115,7 +115,8 @@ describe('get_notification_settings', () => {
     const { text, isError } = await call(mock, 'get_notification_settings');
     expect(isError).toBe(false);
     expect(text).toBe(
-      'subscribe by default: no\nPer-project overrides unavailable: GlitchTip rejected the request: boom',
+      'subscribe by default: no\nPer-project overrides unavailable: ' +
+        '<untrusted source="external" field="overrides.error">GlitchTip rejected the request: boom</untrusted>',
     );
   });
 
@@ -126,8 +127,21 @@ describe('get_notification_settings', () => {
     const { text } = await call(mock, 'get_notification_settings');
     expect(text.split('\n')).toEqual([
       'subscribe by default: yes',
-      'Per-project overrides unavailable: GlitchTip rejected the request: line one line two',
+      'Per-project overrides unavailable: <untrusted source="external" field="overrides.error">' +
+        'GlitchTip rejected the request: line one line two</untrusted>',
     ]);
+  });
+
+  it('json keeps only the error kind of a failed overrides read', async () => {
+    const mock = new MockGlitchTip()
+      .json('GET', URLS.notifications, { subscribeByDefault: true })
+      .json('GET', URLS.alerts, { detail: 'secret-looking detail' }, { status: 400 });
+    const { text } = await call(mock, 'get_notification_settings', { format: 'json' });
+    expect(JSON.parse(text)).toEqual({
+      subscribeByDefault: true,
+      overrides: null,
+      overridesUnavailable: 'invalid',
+    });
   });
 
   it('fails when the settings read fails', async () => {
@@ -173,7 +187,10 @@ describe('get_instance_license', () => {
       .json('GET', URLS.license, { billingEmail: 'billing@example.test' });
     const { text, isError } = await call(mock, 'get_instance_license');
     expect(isError).toBe(false);
-    expect(text).toContain('support license: unknown (support link unavailable: The token lacks');
+    expect(text).toContain(
+      'support license: unknown (support link unavailable: ' +
+        '<untrusted source="external" field="support_link.error">The token lacks',
+    );
   });
 
   it('fails when the license read fails', async () => {
