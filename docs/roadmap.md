@@ -57,7 +57,7 @@ file. `src/config/**` is written by FEAT-014 in wave 1 and FEAT-015 in wave 3 on
 
 ## Phase 3 — Resources and prompts
 
-| ID | Title | Depends on | Spec | Gate | State |
-|---|---|---|---|---|---|
-| — | Resource templates `glitchtip://issues/{id}`, `glitchtip://events/{id}` | issues, events | — | — | NO SPEC |
-| — | Prompts `triage-issue`, `release-health-report` | issues, events, releases | — | — | NO SPEC |
+| ID | Title | Depends on | Spec | Gate | Wave | State |
+|---|---|---|---|---|---|---|
+| FEAT-20260925-019 | Resource templates `glitchtip://issues/{issue_id}` and `…/events/{event_id|latest}` | BUG-018 (src/toolsets/issues, src/format) | [FEAT-20260925-019-resources](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-019-resources.md) | token-safety, registration | after BUG-018 | BLOCKED — work (BUG-018) |
+| FEAT-20260925-020 | Prompts `triage-issue`, `release-health-report` (instruct, never fetch) | — (issues, events, releases merged) | [FEAT-20260925-020-prompts](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-020-prompts.md) | registration | any | READY |
