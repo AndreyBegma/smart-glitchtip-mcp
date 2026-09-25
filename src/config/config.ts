@@ -33,6 +33,11 @@ export interface AppConfig {
     readonly maxBytes: number;
   };
   readonly readOnly: boolean;
+  /**
+   * GLITCHTIP_API_REQUEST_ALLOW_WRITE (D-21): registers the `api_request` write
+   * tool, and only when the server is not read-only and the toolset is enabled.
+   */
+  readonly apiRequestAllowWrite: boolean;
   readonly responseBudget: number;
   readonly logLevel: LogLevel;
 }
@@ -72,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     toolsetsExplicit: e.GLITCHTIP_TOOLSETS.mode === 'explicit',
     uploads: { root: e.GLITCHTIP_UPLOAD_ROOT, maxBytes: e.GLITCHTIP_UPLOAD_MAX_BYTES },
     readOnly: e.GLITCHTIP_READ_ONLY,
+    apiRequestAllowWrite: e.GLITCHTIP_API_REQUEST_ALLOW_WRITE,
     responseBudget: e.MCP_RESPONSE_BUDGET,
     logLevel: e.LOG_LEVEL,
   };
@@ -107,7 +113,24 @@ export function configWarnings(config: AppConfig): string[] {
       );
     }
   }
+  warnings.push(...apiRequestWarnings(config));
   return warnings;
+}
+
+/** GLITCHTIP_API_REQUEST_ALLOW_WRITE only ever adds the write tool; say when it cannot. */
+function apiRequestWarnings(config: AppConfig): string[] {
+  if (!config.apiRequestAllowWrite) return [];
+  if (config.readOnly) {
+    return [
+      'GLITCHTIP_API_REQUEST_ALLOW_WRITE has no effect while read-only (GLITCHTIP_READ_ONLY=true): api_request is not registered.',
+    ];
+  }
+  if (!config.toolsets.includes('api_request')) {
+    return [
+      'GLITCHTIP_API_REQUEST_ALLOW_WRITE has no effect while the api_request toolset is not enabled; add api_request to GLITCHTIP_TOOLSETS.',
+    ];
+  }
+  return [];
 }
 
 /**
