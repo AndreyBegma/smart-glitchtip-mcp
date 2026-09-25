@@ -26,6 +26,7 @@ const DENIED: [ApiMethod, string, string][] = [
   ['PUT', 'users/me/emails', 'account-takeover'],
   ['DELETE', 'users/me/emails', 'account-takeover'],
   ['POST', 'users/me/emails/confirm', 'account-takeover'],
+  ['POST', 'organizations/acme/members/7/set_owner', 'transfer_organization_ownership'],
   ['POST', 'organizations/acme/social-apps', 'SSO app'],
   ['PUT', 'organizations/acme/social-apps/3', 'SSO app'],
 ];

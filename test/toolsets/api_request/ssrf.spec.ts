@@ -134,6 +134,13 @@ describe('normalizeApiPath and assertInsideApi (unit)', () => {
     expect(() => normalizeApiPath('%2541')).toThrow(/encoded/);
   });
 
+  it('judges a non-ASCII escape by the allowed-characters rule, not as a control', () => {
+    expect(() => normalizeApiPath('caf%C3%A9')).toThrow(/may contain only/);
+    expect(() => normalizeApiPath('a%C2%85b')).toThrow(/may contain only/);
+    expect(() => normalizeApiPath('a%85b')).toThrow(/not valid percent-encoded UTF-8/);
+    expect(() => normalizeApiPath('a%0Ab')).toThrow(/control character/);
+  });
+
   it('never names the input in its refusal', () => {
     expect(() => normalizeApiPath('https://evil.example/x')).toThrow(
       expect.objectContaining({ message: expect.not.stringContaining('evil') }),

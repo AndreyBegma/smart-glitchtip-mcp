@@ -84,7 +84,10 @@ function withoutApiPrefix(input: string): string {
 function decodeOnce(path: string): string {
   for (const [, hex] of path.matchAll(/%(.{0,2})/gs)) {
     if (!/^[0-9A-Fa-f]{2}$/.test(hex)) refuse('a `%` in the path must start an escape (%XX).');
-    if (REFUSED_ESCAPED.test(String.fromCharCode(Number.parseInt(hex, 16)))) {
+    const byte = Number.parseInt(hex, 16);
+    // A byte of 0x80 or more is part of a UTF-8 character, not a control:
+    // the allowed-characters rule judges it once decoded.
+    if (byte < 0x80 && REFUSED_ESCAPED.test(String.fromCharCode(byte))) {
       refuse(
         'the path may not contain an encoded /, \\, ., %, ?, # or control character (no encoded traversal or double encoding).',
       );

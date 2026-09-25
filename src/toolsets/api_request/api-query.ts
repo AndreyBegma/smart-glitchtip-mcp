@@ -5,11 +5,14 @@ import { ApiRequestRefusal } from './api-refusal';
 // The `query` argument of the escape hatch (FEAT-20260925-015 "Path rules").
 
 const MAX_KEYS = 30;
-const MAX_STRING = 1000;
+/** The longest string a query value (or `cursor`) may be. */
+export const MAX_QUERY_STRING = 1000;
 const MAX_ITEMS = 100;
 const QUERY_KEY = /^[A-Za-z0-9_.\-[\]]{1,64}$/;
 
-const text = z.string().max(MAX_STRING, `a query value must be at most ${MAX_STRING} characters`);
+const text = z
+  .string()
+  .max(MAX_QUERY_STRING, `a query value must be at most ${MAX_QUERY_STRING} characters`);
 const item = z.union([text, z.number()]);
 const list = z
   .array(item)

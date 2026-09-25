@@ -9,6 +9,11 @@ const SECRET_KEYS = new Set(
   [
     'token',
     'authToken',
+    'auth_token',
+    'accessToken',
+    'access_token',
+    'refreshToken',
+    'refresh_token',
     'clientSecret',
     'client_secret',
     'secret',
@@ -17,9 +22,13 @@ const SECRET_KEYS = new Set(
     'password',
     'sentry_key',
     'privateKey',
+    'private_key',
     'inviteLink',
     'chatwootIdentifierHash',
     'heartbeatEndpoint',
+    // The heartbeat URL's UUID: with it alone anyone can mark a monitor up.
+    'endpointID',
+    'endpoint_id',
   ].map((key) => key.toLowerCase()),
 );
 
@@ -45,24 +54,77 @@ export function redactJson(value: unknown, redactorFor: RedactorFor): unknown {
 
 /**
  * A text body (`text/*`, or JSON that did not parse): the token and secrets
- * removed by value, `"secretKey": "…"` pairs blanked, and every http(s) URL
- * stripped of its fragment and password.
+ * removed by value, the value of every `"secretKey":` blanked, and every
+ * http(s) URL stripped of its fragment and password.
  */
 export function redactText(text: string, redactor: Redactor): string {
-  return redactor
-    .redact(text)
-    .replace(SECRET_PAIR, (_, key: string) => `"${key}": "${REDACTED}"`)
-    .replace(URL_IN_TEXT, (url) => cleanUrl(url, []));
+  return urlsCleaned(blankSecretPairs(redactor.redact(text)), []);
 }
 
-const SECRET_PAIR = new RegExp(
-  `"(${[...SECRET_KEYS].join('|')})"\\s*:\\s*"(?:[^"\\\\]|\\\\.)*"`,
-  'gi',
-);
+const SECRET_KEY_START = new RegExp(`"(${[...SECRET_KEYS].join('|')})"\\s*:\\s*`, 'gi');
 const URL_IN_TEXT = /https?:\/\/[^\s"'<>\\]+/g;
 
+/**
+ * `"secretKey": <value>` → `"secretKey": "[redacted]"`, whatever the value:
+ * a string to its closing quote, an object or array to its matching bracket
+ * (or the end of a cut-off body), anything else to the next `,`, `}`, `]` or
+ * line end.
+ */
+function blankSecretPairs(text: string): string {
+  let result = '';
+  let copied = 0;
+  for (const match of text.matchAll(SECRET_KEY_START)) {
+    if (match.index < copied) continue;
+    const end = valueEnd(text, match.index + match[0].length);
+    result += `${text.slice(copied, match.index)}"${match[1]}": "${REDACTED}"`;
+    copied = end;
+  }
+  return `${result}${text.slice(copied)}`;
+}
+
+function valueEnd(text: string, start: number): number {
+  const first = text[start];
+  if (first === '"') return stringEnd(text, start);
+  if (first === '{' || first === '[') return containerEnd(text, start);
+  const stop = text.slice(start).search(/[,}\]\n]/);
+  return stop === -1 ? text.length : start + stop;
+}
+
+/** Just past the string starting at `start` (a `"`), or the end of the text. */
+function stringEnd(text: string, start: number): number {
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === '\\') i++;
+    else if (text[i] === '"') return i + 1;
+  }
+  return text.length;
+}
+
+/** Just past the object or array starting at `start`, strings skipped, or the end of the text. */
+function containerEnd(text: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < text.length; ) {
+    const c = text[i];
+    if (c === '"') {
+      i = stringEnd(text, i);
+      continue;
+    }
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth--;
+    i++;
+    if (depth === 0) return i;
+  }
+  return text.length;
+}
+
+/** Every http(s) URL inside a longer text, cleaned as `cleanUrl` does. */
+function urlsCleaned(text: string, secrets: string[]): string {
+  return text.replace(URL_IN_TEXT, (url) => cleanUrl(url, secrets));
+}
+
 function byShape(value: unknown, secrets: string[], depth: number): unknown {
-  if (typeof value === 'string') return cleanUrl(value, secrets);
+  if (typeof value === 'string') {
+    return URL.canParse(value) ? cleanUrl(value, secrets) : urlsCleaned(value, secrets);
+  }
   if (value === null || typeof value !== 'object') return value;
   if (depth >= MAX_DEPTH) {
     collectStrings(value, secrets);

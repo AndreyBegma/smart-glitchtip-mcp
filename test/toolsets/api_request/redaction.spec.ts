@@ -46,6 +46,18 @@ describe.each(FORMATS)('redaction, format %s (acceptance 5)', (format) => {
     ],
     ['password (mixed case key)', { PassWord: 'PASSWORD_VALUE' }, 'PASSWORD_VALUE'],
     [
+      'endpointID (a monitor heartbeat UUID)',
+      { monitor: { id: 1, endpointID: '0f1e2d3c-heartbeat-uuid' } },
+      '0f1e2d3c-heartbeat-uuid',
+    ],
+    ['endpoint_id', { endpoint_id: 'ENDPOINT_UUID_2' }, 'ENDPOINT_UUID_2'],
+    ['auth_token', { auth_token: 'AUTH_TOKEN_3' }, 'AUTH_TOKEN_3'],
+    ['private_key', { private_key: 'PRIVATE_KEY_4' }, 'PRIVATE_KEY_4'],
+    ['access_token', { access_token: 'ACCESS_TOKEN_5' }, 'ACCESS_TOKEN_5'],
+    ['accessToken', { accessToken: 'ACCESS_TOKEN_6' }, 'ACCESS_TOKEN_6'],
+    ['refresh_token', { refresh_token: 'REFRESH_TOKEN_7' }, 'REFRESH_TOKEN_7'],
+    ['refreshToken', { refreshToken: 'REFRESH_TOKEN_8' }, 'REFRESH_TOKEN_8'],
+    [
       'a caught secret echoed under another key',
       { token: 'ECHOED_SECRET_7', message: 'your token is ECHOED_SECRET_7' },
       'ECHOED_SECRET_7',
@@ -69,6 +81,15 @@ describe.each(FORMATS)('redaction, format %s (acceptance 5)', (format) => {
     );
     expect(text).not.toContain('LICENSE-KEY-123');
     expect(text).toContain('https://glitchtip.com/support#[redacted]');
+  });
+
+  it('strips a URL fragment inside a longer string value', async () => {
+    const { text } = await get(
+      { message: 'open https://glitchtip.com/support#sub=LICENSE-KEY-999 to renew' },
+      format,
+    );
+    expect(text).not.toContain('LICENSE-KEY-999');
+    expect(text).toContain('https://glitchtip.com/support#[redacted] to renew');
   });
 
   it('masks an alert recipient URL (projects/acme/web/alerts/)', async () => {
@@ -128,6 +149,23 @@ describe('redaction of text and error bodies (acceptance 5)', () => {
     expect(isError).toBe(false);
     expect(text).toContain('did not parse');
     expect(text).not.toContain('BROKEN_SECRET');
+  });
+
+  it('blanks number, object and array values of secret keys in an unparsed body', async () => {
+    const raw =
+      '{"endpointID": 90817263, "secret": {"a": "OBJ_SECRET", "b": {"c": "}"}}, ' +
+      '"api_key": ["ARR_SECRET", "x"], "after": "KEPT_VALUE", "token": "cut-off';
+    const mock = new MockGlitchTip().on(
+      'GET',
+      `${API}/broken/`,
+      new Response(raw, { headers: { 'content-type': 'application/json' } }),
+    );
+    const { text } = await call(mock, 'api_get', { path: 'broken' });
+    for (const secret of ['90817263', 'OBJ_SECRET', 'ARR_SECRET', 'cut-off']) {
+      expect(text).not.toContain(secret);
+    }
+    expect(text).toContain('"after": "KEPT_VALUE"');
+    expect(text).toContain('"api_key": "[redacted]"');
   });
 
   it('removes the token from a 400 whose detail echoes it', async () => {

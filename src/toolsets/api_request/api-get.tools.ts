@@ -8,13 +8,17 @@ import { cursorParam, formatParam, READ_ONLY } from '../../mcp/tool-params';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
 import { checkCall, sendCall } from './api-call';
 import { apiPathParam, SHARED_RULES, UNTRUSTED_SENTENCE } from './api-params';
-import { queryParam } from './api-query';
+import { MAX_QUERY_STRING, queryParam } from './api-query';
 import { apiResultView } from './api-view';
 
 const apiGetArgs = z.object({
   path: apiPathParam,
   query: queryParam,
-  cursor: cursorParam,
+  cursor: z
+    .string()
+    .max(MAX_QUERY_STRING, `cursor must be at most ${MAX_QUERY_STRING} characters`)
+    .optional()
+    .describe(cursorParam.description ?? ''),
   format: formatParam,
 });
 

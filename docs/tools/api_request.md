@@ -36,7 +36,7 @@ flag set with the toolset disabled logs a line of the same kind.
 |---|---|---|
 | `path` | string, ≤ 2000 | Relative to `/api/0/` (`organizations/acme/monitors/`); a leading `/api/0/` is accepted. `""` is the API root. The trailing slash is added when missing. |
 | `query` | object, optional | See [Query](#query). |
-| `cursor` | string, optional | The `next cursor` of a previous page. Shorthand for `query.cursor`; passing both is refused. |
+| `cursor` | string ≤ 1000, optional | The `next cursor` of a previous page. Shorthand for `query.cursor`; passing both is refused. |
 | `format` | `text` \| `json` | |
 
 GET is retried by the client on 429/5xx (D-13). There is no method input, so
@@ -72,6 +72,10 @@ next cursor: 0:100:0
 - An empty JSON array adds the line `Empty list.`.
 - `204` (or an empty body) reads `<METHOD> <path> → 204 — no content.`
 - A `text/*` body is shown with its content type, fenced and budgeted.
+- The text budget cuts on a line boundary, so a body line longer than 1000
+  characters (a minified body, a long string value) is wrapped first, with the
+  line "Lines longer than 1000 characters are wrapped."; a cut then keeps a
+  prefix of the body. The `json` format is never wrapped.
 - Any other content type: status, content type and byte length only; no body.
 - A body declared JSON that does not parse is shown as text with the note
   "GlitchTip declared JSON but the body did not parse" — never "Internal error".
@@ -132,6 +136,7 @@ entry is a normal PR, removing one needs a decision.
 | `stripe/organizations/*/create-billing-portal` | all | same |
 | `import` | all | makes the instance fetch an arbitrary external URL with a caller-supplied token |
 | `users/*` | `DELETE` | deletes the token's own account, irreversibly (other methods allowed) |
+| `organizations/*/members/*/set_owner` | `POST`, `PUT`, `PATCH`, `DELETE` | transfers ownership of the organization; `transfer_organization_ownership` (members toolset) is the explicit, confirmed tool for it (recorded against D-23) |
 | `users/*/emails`, `users/*/emails/confirm` | `POST`, `PUT`, `PATCH`, `DELETE` | account-takeover path (password resets go to the primary address); `GET` allowed |
 | `organizations/*/social-apps`, `organizations/*/social-apps/*` | `POST`, `PUT`, `PATCH` | an IdP client secret through the model, and SSO auto-joins users; `DELETE` allowed (D-23) |
 
@@ -161,15 +166,21 @@ redacted before it is parsed for display, fenced, budgeted or returned
    wherever it appears — `GET /api/0/` returns it as `auth.token`. `client.raw()`
    scrubs it too; this toolset scrubs again, and from every error detail.
 2. **Secret keys**, at any depth, case-insensitive: `token`, `authToken`,
-   `clientSecret`, `client_secret`, `secret` (so `dsn.secret`; `dsn.public` is
-   kept), `apiKey`, `api_key`, `password`, `sentry_key`, `privateKey`,
-   `inviteLink`, `chatwootIdentifierHash`, `heartbeatEndpoint` → `"[redacted]"`.
+   `auth_token`, `accessToken`, `access_token`, `refreshToken`,
+   `refresh_token`, `clientSecret`, `client_secret`, `secret` (so `dsn.secret`;
+   `dsn.public` is kept), `apiKey`, `api_key`, `password`, `sentry_key`,
+   `privateKey`, `private_key`, `inviteLink`, `chatwootIdentifierHash`,
+   `heartbeatEndpoint`, `endpointID`, `endpoint_id` → `"[redacted]"`.
+   `endpointID` is the UUID in a monitor's heartbeat URL: with it alone anyone
+   can mark the monitor up, so it is a secret like the URL itself.
    Each value caught this way is then also removed wherever else it appears in
-   the body. In a text body (or JSON that did not parse) `"<key>": "…"` pairs
-   are blanked the same way.
-3. **URL fragments** (`#sub=<license key>`) are replaced by `#[redacted]`, in
-   every JSON string that is a URL and every `http(s)://` URL in a text body;
-   a URL's password is replaced as well.
+   the body. In a text body (or JSON that did not parse) the value after
+   `"<key>":` is blanked the same way, whatever it is: a string to its closing
+   quote, an object or array to its matching bracket (or the end of a cut-off
+   body), anything else to the next `,`, `}`, `]` or line end.
+3. **URL fragments** (`#sub=<license key>`) are replaced by `#[redacted]` in
+   every `http(s)://` URL, whether a JSON string is the URL or only contains
+   one, and in a text body; a URL's password is replaced as well.
 4. **Alert recipients**, by shape: any object with a `recipientType` key and a
    string `url` shows only the URL's origin (plus `/…`); an unparsable URL
    reads `unparsable URL (masked)`.

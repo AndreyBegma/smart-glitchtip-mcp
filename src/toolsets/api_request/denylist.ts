@@ -75,6 +75,12 @@ export const DENYLIST: readonly DenyRule[] = [
       'changing e-mail addresses is an account-takeover path (password resets go to the primary address).',
   },
   {
+    pattern: 'organizations/*/members/*/set_owner',
+    methods: WRITES,
+    reason:
+      'it transfers ownership of the organization; use transfer_organization_ownership (members toolset), which requires an explicit confirm.',
+  },
+  {
     pattern: 'organizations/*/social-apps',
     methods: ['POST', 'PUT', 'PATCH'],
     reason:

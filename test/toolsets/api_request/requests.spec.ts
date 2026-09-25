@@ -259,6 +259,27 @@ describe('query and cursor (acceptance 7, 8)', () => {
     expect(mock.requests).toEqual([]);
   });
 
+  it('refuses a cursor over 1000 characters', async () => {
+    const mock = new MockGlitchTip();
+    const { isError } = await call(mock, 'api_get', { path: 'x', cursor: 'c'.repeat(1001) });
+    expect(isError).toBe(true);
+    expect(mock.requests).toEqual([]);
+  });
+
+  it('accepts a 1000-character cursor', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/x/`, []);
+    const { isError } = await call(mock, 'api_get', { path: 'x', cursor: 'c'.repeat(1000) });
+    expect(isError).toBe(false);
+  });
+
+  it('refuses a 1001-character array item', async () => {
+    const mock = new MockGlitchTip();
+    const query = { q: ['x'.repeat(1001)] };
+    const { isError } = await call(mock, 'api_get', { path: 'x', query });
+    expect(isError).toBe(true);
+    expect(mock.requests).toEqual([]);
+  });
+
   it('sends arrays as repeated parameters and cursor as query.cursor', async () => {
     const mock = new MockGlitchTip().json('GET', `${API}/x/`, []);
     await call(mock, 'api_get', { path: 'x', query: { project: [1, 2, 3] }, cursor: '0:100:0' });
@@ -358,6 +379,42 @@ describe('untrusted data (acceptance 10, 11)', () => {
     const parsed = JSON.parse(fenced(text));
     expect(parsed).toMatchObject({ status: 200, nextCursor: '0:100:0', truncated: true });
     expect(text).not.toContain('"untrusted":');
+  });
+
+  it.each([
+    ['text/plain', 'text/plain'],
+    ['unparsed JSON', 'application/json'],
+  ])('keeps a prefix of a single-line %s body over budget', async (_, type) => {
+    const line = `START${'A'.repeat(30_000)}`;
+    const mock = new MockGlitchTip().on(
+      'GET',
+      `${API}/one-line/`,
+      new Response(line, { headers: { 'content-type': type } }),
+    );
+    const { text } = await call(mock, 'api_get', { path: 'one-line' });
+    expect(text.length).toBeLessThanOrEqual(20_000);
+    expect(text).toContain('Lines longer than 1000 characters are wrapped.');
+    expect(text).toContain(`START${'A'.repeat(995)}`);
+    expect(text).toMatch(/<\/untrusted>\n… truncated \d+ of \d+ characters/);
+  });
+
+  it('keeps a prefix of a JSON body with one long string value', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/long/`, { note: 'B'.repeat(30_000) });
+    const { text } = await call(mock, 'api_get', { path: 'long' });
+    expect(text.length).toBeLessThanOrEqual(20_000);
+    expect(text).toContain('"note": "BBBB');
+  });
+
+  it('never splits a surrogate pair when wrapping', async () => {
+    const line = `${'x'.repeat(999)}😀${'y'.repeat(1500)}`;
+    const mock = new MockGlitchTip().on(
+      'GET',
+      `${API}/emoji/`,
+      new Response(line, { headers: { 'content-type': 'text/plain' } }),
+    );
+    const { text } = await call(mock, 'api_get', { path: 'emoji' });
+    expect(text).toContain('😀');
+    expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
   it('cuts a long text body inside the budget and closes the fence', async () => {
