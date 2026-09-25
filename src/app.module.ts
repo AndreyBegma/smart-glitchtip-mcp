@@ -11,6 +11,7 @@ import { CoreTools } from './mcp/core.tools';
 import { HttpAuthGuard } from './mcp/http-auth.guard';
 import { HealthController, mcpHttpController } from './mcp/mcp-http.controller';
 import { selectToolsets } from './mcp/toolset.registry';
+import { selectPrompts } from './prompts/prompts.registry';
 import type { ToolsetDefinition } from './toolsets/toolset';
 
 export interface AppModuleOptions {
@@ -38,7 +39,11 @@ export class AppModule {
     for (const name of selection.unavailable) {
       logger.warn({ toolset: name }, `Toolset "${name}" is enabled but not yet available.`);
     }
-    const controllers: Type[] = [CoreTools, ...selection.controllers];
+    const controllers: Type[] = [
+      CoreTools,
+      ...selection.controllers,
+      ...selectPrompts(config, options.toolsets),
+    ];
     const providers: Provider[] = [
       { provide: APP_CONFIG, useValue: config },
       InstanceResolver,
