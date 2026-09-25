@@ -150,7 +150,10 @@ export class EventsTools {
           },
         }),
     );
-    return this.output.render(args.format, eventListView(page, { includeGroupId: false }));
+    return this.output.render(
+      args.format,
+      eventListView(page, { includeGroupId: false }, this.config.responseBudget),
+    );
   }
 
   @Tool({
@@ -243,7 +246,10 @@ export class EventsTools {
         ),
       `Event ${args.event_id} was not found for issue ${args.issue_id}.`,
     );
-    return this.output.render(args.format, eventJsonView(raw, args.path));
+    return this.output.render(
+      args.format,
+      eventJsonView(raw, args.path, this.config.responseBudget),
+    );
   }
 
   @Tool({
@@ -274,7 +280,10 @@ export class EventsTools {
           },
         }),
     );
-    return this.output.render(args.format, eventListView(page, { includeGroupId: true }));
+    return this.output.render(
+      args.format,
+      eventListView(page, { includeGroupId: true }, this.config.responseBudget),
+    );
   }
 
   @Tool({

@@ -265,3 +265,138 @@ export const untrustedFrameEscape = buildEvent({
     },
   ],
 });
+
+// Malformed shapes (review: "Defensive parsing — must degrade, never
+// 'Internal error'"). Each deviates from the generated schema the way an
+// SDK, a hand-rolled ingest client, or a future GlitchTip release plausibly
+// could; every tool must still answer with text, never a thrown error.
+// `as unknown as EventDetail` is deliberate: these are the shapes a real
+// response is not supposed to take.
+
+export const malformedEntriesObject = buildEvent({
+  id: 'evt-malformed-entries-object',
+  entries: { 0: { type: 'exception', data: { values: [] } } } as unknown as EventDetail['entries'],
+});
+
+export const malformedNullEntries = buildEvent({
+  id: 'evt-malformed-null-entries',
+  entries: [
+    null,
+    { type: 'message', data: { formatted: 'still readable' } },
+    'nope',
+  ] as unknown as EventDetail['entries'],
+});
+
+export const malformedExceptionDataNull = buildEvent({
+  id: 'evt-malformed-exception-data-null',
+  entries: [{ type: 'exception', data: null }] as unknown as EventDetail['entries'],
+});
+
+export const malformedTagsNull = buildEvent({
+  id: 'evt-malformed-tags-null',
+  tags: null as unknown as EventDetail['tags'],
+});
+
+export const malformedTagsObject = buildEvent({
+  id: 'evt-malformed-tags-object',
+  tags: { level: 'error' } as unknown as EventDetail['tags'],
+});
+
+export const malformedTagsWithNull = buildEvent({
+  id: 'evt-malformed-tags-with-null',
+  tags: [null, { key: 'release', value: '1.0' }] as unknown as EventDetail['tags'],
+});
+
+export const malformedErrorsObject = buildEvent({
+  id: 'evt-malformed-errors-object',
+  errors: { 0: { type: 'x' } } as unknown as EventDetail['errors'],
+});
+
+export const malformedErrorsWithNull = buildEvent({
+  id: 'evt-malformed-errors-with-null',
+  errors: [null, { type: 'ProcessingError', value: 'bad' }] as unknown as EventDetail['errors'],
+});
+
+export const malformedRequestHeadersObjectAndQueryString = buildEvent({
+  id: 'evt-malformed-request',
+  entries: [
+    {
+      type: 'request',
+      data: {
+        method: 'GET',
+        url: 'https://example.com/a',
+        query: 'q=1&r=2',
+        headers: { Cookie: 'secret=1', 'X-Forwarded-For': '203.0.113.9', 'User-Agent': 'ua' },
+        inferredContentType: null,
+      },
+    },
+  ] as unknown as EventDetail['entries'],
+});
+
+export const malformedRequestNullPairs = buildEvent({
+  id: 'evt-malformed-request-null-pairs',
+  entries: [
+    {
+      type: 'request',
+      data: {
+        method: 'GET',
+        url: 'https://example.com/b',
+        query: [null, ['ok', 'yes'], [null, null]],
+        headers: [null, ['User-Agent', 'ua'], ['Cookie', 'x']],
+        inferredContentType: null,
+      },
+    },
+  ] as unknown as EventDetail['entries'],
+});
+
+export const malformedVars = buildEvent({
+  id: 'evt-malformed-vars',
+  entries: [
+    {
+      type: 'exception',
+      data: {
+        values: [
+          {
+            type: 'TypeError',
+            value: 'bad var',
+            stacktrace: {
+              frames: [
+                {
+                  filename: 'app.py',
+                  function: 'run',
+                  lineno: 1,
+                  in_app: true,
+                  vars: {
+                    ok: 'fine',
+                    circular: (() => {
+                      const value: Record<string, unknown> = {};
+                      value.self = value;
+                      return value;
+                    })(),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  ],
+});
+
+type EventListItem = components['schemas']['IssueEventSchema'];
+
+/** For `list_issue_events`/`list_project_events`: a row with `title`/`tags` sent as `null`. */
+export const malformedListItem = {
+  id: 'evt-malformed-list',
+  eventID: 'a',
+  projectID: 1,
+  groupID: 'grp-1',
+  dateCreated: 'x',
+  dateReceived: '2026-01-02T03:04:06Z',
+  type: 'error',
+  message: '',
+  tags: null,
+  title: null,
+  entries: [],
+} as unknown as EventListItem;

@@ -11,6 +11,14 @@ const API = `${GLITCHTIP}/api/0`;
 const TOKEN = 'tok_TEST';
 const ORG = 'acme';
 
+// get_event_json's whole result is one untrusted('payload', …) fence (D-18).
+const FENCE = /^<untrusted source="glitchtip-event" field="payload">([\s\S]*)<\/untrusted>$/;
+function unfence(text: string): unknown {
+  const match = FENCE.exec(text);
+  expect(match).not.toBeNull();
+  return JSON.parse(match?.[1] ?? '');
+}
+
 const READ = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -209,6 +217,7 @@ describe('get_event_json', () => {
       event_id: 'evt-1',
     });
     expect(isError).toBe(false);
+    expect(text).toMatch(FENCE);
     expect(text).not.toContain('203.0.113.9');
     expect(text).not.toContain('"city"');
     expect(text).not.toContain('session=secret');
@@ -229,7 +238,7 @@ describe('get_event_json', () => {
       path: '/contexts/runtime',
     });
     expect(isError).toBe(false);
-    expect(JSON.parse(text)).toEqual({ name: 'CPython', version: '3.11' });
+    expect(unfence(text)).toEqual({ name: 'CPython', version: '3.11' });
   });
 
   it('refuses a pointer that matches nothing, without a second request', async () => {

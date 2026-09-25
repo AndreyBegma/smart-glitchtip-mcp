@@ -39,3 +39,12 @@ export function truncate(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
+
+/** `JSON.stringify`, but a value it can't serialise (a BigInt, a throwing getter) degrades, never throws. */
+export function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? 'null';
+  } catch {
+    return '[unserialisable]';
+  }
+}

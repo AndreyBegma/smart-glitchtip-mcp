@@ -6,9 +6,11 @@ import {
 } from '../../../src/toolsets/events/event.render';
 import type { RenderOptions } from '../../../src/toolsets/events/event.types';
 import {
+  buildEvent,
   chainedException,
   fullySectionedEvent,
   jsNoInAppFrames,
+  malformedVars,
   messageOnly,
   pythonMixedFrames,
   unknownExceptionShape,
@@ -129,8 +131,12 @@ describe('sections (acceptance 5)', () => {
 describe('untrusted content (acceptance 8)', () => {
   it('escapes a context line that carries a closing fence', () => {
     const text = render(untrustedFrameEscape);
-    // Exactly one real closing tag: the payload's own "</untrusted>" is escaped, not a second close.
-    expect(text.match(/<\/untrusted>/g)).toHaveLength(1);
+    // Two real fences (header, exception): the payload's own "</untrusted>"
+    // must not have added a third, unbalanced close.
+    const opens = text.match(/<untrusted /g) ?? [];
+    const closes = text.match(/<\/untrusted>/g) ?? [];
+    expect(opens).toHaveLength(2);
+    expect(closes).toHaveLength(2);
     expect(text).toContain('&lt;/untrusted>');
   });
 });
@@ -144,5 +150,113 @@ describe('json format (acceptance 4)', () => {
     expect(projected.header.id).toBe('evt-python');
     expect(projected.exceptions[0].frames).toHaveLength(2);
     expect(projected.exceptions[0].frames.every((frame) => frame.inApp === true)).toBe(true);
+  });
+});
+
+describe('header fencing (review 5)', () => {
+  it('fences the header, which carries event-reported release/environment/platform/level', () => {
+    const text = render(fullySectionedEvent);
+    const header =
+      /<untrusted source="glitchtip-event" field="header">([\s\S]*?)<\/untrusted>/.exec(text);
+    expect(header).not.toBeNull();
+    expect(header?.[1]).toContain('release: 2.0.0');
+    expect(header?.[1]).toContain('environment: staging');
+  });
+});
+
+describe('fence-safe truncation (review 7)', () => {
+  it('closes every open fence before the truncation marker when the core still overflows', () => {
+    const bigValue = (n: number) => `V${n}-${'x'.repeat(900)}`;
+    const manyValues = buildEvent({
+      id: 'evt-huge-chain',
+      title: 'ChainedError: overloaded',
+      entries: [
+        {
+          type: 'exception',
+          data: {
+            values: [0, 1, 2].map((n) => ({
+              type: 'Error',
+              value: bigValue(n),
+              stacktrace: {
+                frames: [{ filename: `app/${n}.py`, function: `f${n}`, lineno: 1, in_app: true }],
+              },
+            })),
+          },
+        },
+      ],
+    });
+    const text = render(manyValues, DEFAULT_OPTIONS, 1200);
+    const opens = text.match(/<untrusted /g) ?? [];
+    const closes = text.match(/<\/untrusted>/g) ?? [];
+    expect(opens.length).toBe(closes.length);
+    expect(text).toContain('truncated for budget');
+  });
+});
+
+describe('unserialisable vars (review 10)', () => {
+  it('degrades a var that cannot be JSON.stringify-d instead of throwing', () => {
+    expect(() => render(malformedVars, { ...DEFAULT_OPTIONS, includeVars: true })).not.toThrow();
+    const text = render(malformedVars, { ...DEFAULT_OPTIONS, includeVars: true });
+    expect(text).toContain('ok=fine');
+    expect(text).toContain('circular=[unserialisable]');
+  });
+});
+
+describe('exception value capping (review 11)', () => {
+  it('caps a huge exception value and still keeps the header and the top frame at a tight budget', () => {
+    const huge = buildEvent({
+      id: 'evt-huge-value',
+      title: 'MemoryError: huge',
+      entries: [
+        {
+          type: 'exception',
+          data: {
+            values: [
+              {
+                type: 'MemoryError',
+                value: 'x'.repeat(50_000),
+                stacktrace: {
+                  frames: [{ filename: 'app.py', function: 'allocate', lineno: 1, in_app: true }],
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const text = render(huge, DEFAULT_OPTIONS, 2000);
+    expect(text.length).toBeLessThanOrEqual(2000);
+    expect(text).toContain('evt-huge-value');
+    expect(text).toContain('at allocate (app.py:1');
+  });
+});
+
+describe('breadcrumb/message capping (review 13)', () => {
+  it('caps an oversized breadcrumb message', () => {
+    const huge = buildEvent({
+      id: 'evt-huge-breadcrumb',
+      entries: [
+        {
+          type: 'breadcrumbs',
+          data: {
+            values: [
+              { type: 'default', category: 'log', level: 'info', message: 'z'.repeat(5000) },
+            ],
+          },
+        },
+      ],
+    });
+    const text = render(huge, { ...DEFAULT_OPTIONS, breadcrumbs: 10 });
+    const line = text.split('\n').find((l) => l.includes('log:'));
+    expect(line?.length).toBeLessThan(400);
+  });
+
+  it('caps an oversized Message section', () => {
+    const huge = buildEvent({
+      id: 'evt-huge-message',
+      entries: [{ type: 'message', data: { formatted: 'm'.repeat(50_000) } }],
+    });
+    const text = render(huge);
+    expect(text.length).toBeLessThan(3000);
   });
 });

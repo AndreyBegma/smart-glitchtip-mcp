@@ -1,6 +1,6 @@
 import { keyValues } from '../../format/table';
 import { untrusted } from '../../format/untrusted';
-import { truncate } from './event.guards';
+import { safeStringify, truncate } from './event.guards';
 import { redactHeaderPairs } from './event.redact';
 import type {
   ParsedBreadcrumb,
@@ -14,6 +14,11 @@ import type {
 
 const CONTEXT_LINE_LIMIT = 160;
 const VAR_LIMIT = 200;
+/** Hard structural caps: independent of budget, so an attacker-sized chain or */
+/** stacktrace can't blow the non-droppable core no matter how tight the budget is. */
+const MAX_EXCEPTION_VALUES = 10;
+const MAX_FRAMES = 50;
+const TRUNCATION_MARKER = '\n… truncated for budget …';
 /** Sections dropped, in this order, before the foundation's tail-cut budget runs (spec AC7). */
 const DROPPABLE_SECTIONS = ['breadcrumbs', 'tags', 'context'] as const;
 
@@ -22,29 +27,50 @@ interface Section {
   readonly text: string;
 }
 
-/** The full text rendering, trimmed section-by-section to fit `budget` (spec AC7). */
+/**
+ * The full text rendering, trimmed section-by-section to fit `budget` (spec
+ * AC7). The result is guaranteed `<= budget` (any fence still open at that
+ * point is closed before the marker), so the foundation's tail-cut safety
+ * net never has to fire — it would otherwise risk cutting an
+ * `<untrusted>` fence in half.
+ */
 export function renderEventDetailText(
   parsed: ParsedEvent,
   options: RenderOptions,
   budget: number,
 ): string {
-  const sections = buildSections(parsed, options);
+  const sections = buildSections(parsed, options, budget);
   let active = sections;
   for (const key of DROPPABLE_SECTIONS) {
     if (assemble(active).length <= budget) break;
     active = active.filter((section) => section.key !== key);
   }
-  return assemble(active);
+  const assembled = assemble(active);
+  return assembled.length <= budget ? assembled : closeFencesAtCut(assembled, budget);
 }
 
 function assemble(sections: readonly Section[]): string {
   return sections.map((section) => section.text).join('\n\n');
 }
 
-function buildSections(parsed: ParsedEvent, options: RenderOptions): readonly Section[] {
+/** A last-resort cut ahead of the foundation's own, guaranteed not to leave a fence open. */
+function closeFencesAtCut(text: string, budget: number): string {
+  const room = Math.max(0, budget - TRUNCATION_MARKER.length);
+  const cut = text.slice(0, room);
+  const opens = (cut.match(/<untrusted /g) ?? []).length;
+  const closes = (cut.match(/<\/untrusted>/g) ?? []).length;
+  const closing = '</untrusted>'.repeat(Math.max(0, opens - closes));
+  return `${cut}${closing}${TRUNCATION_MARKER}`;
+}
+
+function buildSections(
+  parsed: ParsedEvent,
+  options: RenderOptions,
+  budget: number,
+): readonly Section[] {
   const candidates: ReadonlyArray<readonly [string, string | undefined]> = [
     ['header', renderHeader(parsed)],
-    ['exception', renderExceptionSection(parsed.exception, options)],
+    ['exception', renderExceptionSection(parsed.exception, options, budget)],
     ['message', renderMessageSection(parsed.message)],
     ['breadcrumbs', renderBreadcrumbsSection(parsed.breadcrumbs, options.breadcrumbs)],
     ['request', renderRequestSection(parsed.request, options.includeRequestHeaders)],
@@ -59,8 +85,9 @@ function buildSections(parsed: ParsedEvent, options: RenderOptions): readonly Se
     .map(([key, text]) => ({ key, text }));
 }
 
+/** `id`/dates are server-assigned; `level`/`platform`/`release`/`environment` are event-reported (D-18). */
 function renderHeader(parsed: ParsedEvent): string {
-  return keyValues([
+  const lines = keyValues([
     ['event id', parsed.id],
     ['date received', parsed.dateReceived],
     ['level', parsed.level],
@@ -70,30 +97,45 @@ function renderHeader(parsed: ParsedEvent): string {
     ['next event', parsed.nextEventID],
     ['previous event', parsed.previousEventID],
   ]);
+  return untrusted('header', lines);
 }
 
 function renderExceptionSection(
   exception: ParsedException | undefined,
   options: RenderOptions,
+  budget: number,
 ): string | undefined {
   if (!exception) return undefined;
   if (!exception.recognised) {
     return 'exception data in an unrecognised shape — use get_event_json';
   }
-  const blocks = [...exception.values]
-    .reverse()
-    .map((value) => renderExceptionValue(value, options));
+  const ordered = [...exception.values].reverse();
+  const shown = ordered.slice(0, MAX_EXCEPTION_VALUES);
+  const omitted = ordered.length - shown.length;
+  const blocks = shown.map((value) => renderExceptionValue(value, options, budget));
+  if (omitted > 0)
+    blocks.push(`… ${omitted} earlier exception${omitted === 1 ? '' : 's'} omitted …`);
   return untrusted('exception', blocks.join('\n\n'));
 }
 
-function renderExceptionValue(value: ParsedExceptionValue, options: RenderOptions): string {
+function renderExceptionValue(
+  value: ParsedExceptionValue,
+  options: RenderOptions,
+  budget: number,
+): string {
   const heading = `${value.type ?? 'Error'}: ${value.value ?? ''}`.trim();
-  return [heading, ...renderFrameLines(value.frames, options)].join('\n');
+  const full = [heading, ...renderFrameLines(value.frames, options)].join('\n');
+  if (full.length <= budget) return full;
+  // Too big even on its own (a pathological frame count): fall back to just
+  // the most recent frame so the stack trace's most useful line survives.
+  const top = selectDisplayFrames(value.frames)[0];
+  const lines = top ? renderFrame(top, options) : [];
+  return [heading, ...lines].join('\n');
 }
 
 /** Most-recent-call-first, in-app frames kept, library runs collapsed (spec "The event renderer"). */
 function renderFrameLines(frames: readonly ParsedFrame[], options: RenderOptions): string[] {
-  const ordered = [...frames].reverse();
+  const ordered = capFrames(frames);
   const anyInApp = ordered.some((frame) => frame.inApp === true);
   if (!anyInApp) return ordered.slice(0, 5).flatMap((frame) => renderFrame(frame, options));
   const lines: string[] = [];
@@ -113,13 +155,18 @@ function renderFrameLines(frames: readonly ParsedFrame[], options: RenderOptions
   return lines;
 }
 
+/** Most-recent-call-first, capped to MAX_FRAMES regardless of how many the payload claims. */
+function capFrames(frames: readonly ParsedFrame[]): readonly ParsedFrame[] {
+  return [...frames].reverse().slice(0, MAX_FRAMES);
+}
+
 function renderFrame(frame: ParsedFrame, options: RenderOptions): string[] {
   const location = `${frame.filename ?? frame.module ?? '?'}:${frame.lineno ?? '?'}:${frame.colno ?? '?'}`;
   const lines = [`  at ${frame.function ?? '?'} (${location})`];
   if (frame.contextLine) lines.push(`    ${truncate(frame.contextLine, CONTEXT_LINE_LIMIT)}`);
   if (options.includeContext) {
     for (const line of [...(frame.preContext ?? []), ...(frame.postContext ?? [])]) {
-      lines.push(`    ${line}`);
+      lines.push(`    ${truncate(line, CONTEXT_LINE_LIMIT)}`);
     }
   }
   if (options.includeVars && frame.vars) {
@@ -132,7 +179,7 @@ function renderFrame(frame: ParsedFrame, options: RenderOptions): string[] {
 }
 
 function stringifyVar(value: unknown): string {
-  return typeof value === 'string' ? value : JSON.stringify(value);
+  return typeof value === 'string' ? value : safeStringify(value);
 }
 
 function renderMessageSection(message: string | undefined): string | undefined {
@@ -220,25 +267,28 @@ function projectExceptions(
 ): unknown {
   if (!exception) return [];
   if (!exception.recognised) return 'unrecognised';
-  return [...exception.values].reverse().map((value) => ({
-    type: value.type ?? null,
-    value: value.value ?? null,
-    frames: selectDisplayFrames(value.frames).map((frame) => ({
-      inApp: frame.inApp ?? null,
-      function: frame.function ?? null,
-      filename: frame.filename ?? null,
-      lineno: frame.lineno ?? null,
-      colno: frame.colno ?? null,
-      contextLine:
-        frame.contextLine && options.includeContext
-          ? truncate(frame.contextLine, CONTEXT_LINE_LIMIT)
-          : null,
-    })),
-  }));
+  return [...exception.values]
+    .reverse()
+    .slice(0, MAX_EXCEPTION_VALUES)
+    .map((value) => ({
+      type: value.type ?? null,
+      value: value.value ?? null,
+      frames: selectDisplayFrames(value.frames).map((frame) => ({
+        inApp: frame.inApp ?? null,
+        function: frame.function ?? null,
+        filename: frame.filename ?? null,
+        lineno: frame.lineno ?? null,
+        colno: frame.colno ?? null,
+        contextLine:
+          frame.contextLine && options.includeContext
+            ? truncate(frame.contextLine, CONTEXT_LINE_LIMIT)
+            : null,
+      })),
+    }));
 }
 
 function selectDisplayFrames(frames: readonly ParsedFrame[]): readonly ParsedFrame[] {
-  const ordered = [...frames].reverse();
+  const ordered = capFrames(frames);
   const anyInApp = ordered.some((frame) => frame.inApp === true);
   return anyInApp ? ordered.filter((frame) => frame.inApp) : ordered.slice(0, 5);
 }

@@ -33,7 +33,7 @@ function step(current: unknown, token: string, pointer: string, walkedPath: stri
     return current[index];
   }
   const record = asRecord(current);
-  if (!record || !(token in record)) {
+  if (!record || !Object.hasOwn(record, token)) {
     throw new InvalidPointerError(
       `JSON Pointer ${pointer}: no "${walkedPath}" in the event payload.`,
     );
