@@ -25,6 +25,14 @@ import type { View } from '../../format/tool-output';
 
 const HOUR_MS = 3_600_000;
 const FIELD = 'sum(quantity)';
+/**
+ * GlitchTip always builds an interval as `datetime.astimezone().replace(microsecond=0)
+ * .isoformat()` (`apps/stats/api.py`) — seconds are always present, never a bare "Z" for a
+ * whole minute. A response entry that doesn't match this shape is a structural surprise,
+ * not something `Date.parse` should be trusted to interpret loosely (it accepts far more
+ * than ISO 8601, including formats GlitchTip would never send).
+ */
+const STRICT_INTERVAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
 
 /** `null` marks a genuinely unavailable bucket — never confused with a known 0. */
 type BucketValue = number | null;
@@ -71,17 +79,23 @@ export function reconstructHourlyGrid(
   const returned = new Map<number, { iso: string; value: BucketValue }>();
   for (let i = 0; i < response.intervals.length; i++) {
     const iso = response.intervals[i];
+    if (!STRICT_INTERVAL_ISO.test(iso)) continue;
     const instant = Date.parse(iso);
-    if (Number.isNaN(instant)) continue;
     const value: BucketValue =
       i < data.length ? (typeof data[i] === 'number' ? (data[i] as number) : 0) : null;
     returned.set(truncateHour(instant), { iso, value });
   }
   const startHour = truncateHour(Date.parse(start));
-  const endHour = truncateHour(Date.parse(end));
+  // Rounded UP: a range ending mid-hour (00:10–00:50, or 00:00–02:30) still owns the hour
+  // it ends inside — 00:10–00:50 is one bucket, not zero; 00:00–02:30 includes 02:00–02:30
+  // as its own bucket (review should-fix). An `end` already on the hour is unaffected:
+  // Math.ceil of an exact multiple is that multiple.
+  const endHour = Math.ceil(Date.parse(end) / HOUR_MS) * HOUR_MS;
   const hours: string[] = [];
   const values: BucketValue[] = [];
-  let lastOffset = 'Z';
+  // Seeded from the first returned interval, not a bare "Z" default, so a gap before any
+  // real data still renders in the server's own timezone rather than an assumed UTC.
+  let lastOffset = firstReturnedOffset(returned) ?? 'Z';
   for (let t = startHour; t < endHour; t += HOUR_MS) {
     const found = returned.get(t);
     if (found) {
@@ -94,6 +108,15 @@ export function reconstructHourlyGrid(
     }
   }
   return { hours, values };
+}
+
+/** The offset of the chronologically earliest returned interval, if there is one. */
+function firstReturnedOffset(
+  returned: ReadonlyMap<number, { iso: string; value: BucketValue }>,
+): string | undefined {
+  if (returned.size === 0) return undefined;
+  const earliest = Math.min(...returned.keys());
+  return offsetOf((returned.get(earliest) as { iso: string }).iso);
 }
 
 function truncateHour(ms: number): number {

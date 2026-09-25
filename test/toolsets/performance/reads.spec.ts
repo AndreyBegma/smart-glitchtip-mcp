@@ -225,6 +225,25 @@ describe('get_transaction_group', () => {
     );
   });
 
+  it('shows "?" for a non-numeric id or project instead of the raw value (review should-fix)', async () => {
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/transaction-groups/42/`,
+      {
+        ...GROUP,
+        id: 'oops',
+        project: 'oops',
+      },
+    );
+    const { text, isError } = await call(mock, 'get_transaction_group', {
+      organization: 'acme',
+      transaction_group_id: 42,
+    });
+    expect(isError).toBe(false);
+    expect(text).toContain('id: ?');
+    expect(text).toContain('project: ?');
+  });
+
   it('the hint line uses the requested id, not a response field (review should-fix)', async () => {
     // A malformed response with the wrong id must not derail the hint's own tool call.
     const mock = new MockGlitchTip().json(

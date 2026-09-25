@@ -78,6 +78,51 @@ describe('reconstructHourlyGrid', () => {
     const grid = reconstructHourlyGrid(response, '2026-01-01T00:00:00Z', '2026-01-01T02:00:00Z');
     for (const hour of grid.hours) expect(hour.endsWith('Z')).toBe(true);
   });
+
+  it('rounds end up to the next hour: 00:00–02:30 includes 02:00–02:30 as its own bucket (review should-fix 1)', () => {
+    const response = asStatsV2Response({ intervals: [], groups: [] });
+    const grid = reconstructHourlyGrid(response, '2026-01-01T00:00:00Z', '2026-01-01T02:30:00Z');
+    expect(grid.hours).toEqual([
+      '2026-01-01T00:00:00Z',
+      '2026-01-01T01:00:00Z',
+      '2026-01-01T02:00:00Z',
+    ]);
+  });
+
+  it('rounds end up to the next hour: 00:10–00:50 is one bucket, never zero (review should-fix 1)', () => {
+    const response = asStatsV2Response({ intervals: [], groups: [] });
+    const grid = reconstructHourlyGrid(response, '2026-01-01T00:10:00Z', '2026-01-01T00:50:00Z');
+    expect(grid.hours).toEqual(['2026-01-01T00:00:00Z']);
+    expect(grid.values).toEqual([0]);
+  });
+
+  it('leaves an end already on the hour unrounded (Math.ceil of an exact multiple)', () => {
+    const response = asStatsV2Response({ intervals: [], groups: [] });
+    const grid = reconstructHourlyGrid(response, '2026-01-01T00:00:00Z', '2026-01-01T02:00:00Z');
+    expect(grid.hours).toHaveLength(2);
+  });
+
+  it('seeds the offset from the first returned interval, not a bare Z, when a gap precedes it (review should-fix 2)', () => {
+    const response = asStatsV2Response({
+      intervals: ['2026-01-01T02:00:00+02:00'],
+      groups: [{ series: { 'sum(quantity)': [5] } }],
+    });
+    // Hours 00:00 and 01:00 both precede the only returned interval, so under the old
+    // "default to Z, update only on the way past a real entry" logic they would have
+    // rendered in Z; they must borrow +02:00 instead.
+    const grid = reconstructHourlyGrid(response, '2026-01-01T00:00:00Z', '2026-01-01T03:00:00Z');
+    expect(grid.hours[0]?.endsWith('+02:00')).toBe(true);
+    expect(grid.hours[1]?.endsWith('+02:00')).toBe(true);
+  });
+
+  it('ignores a returned interval that fails the strict ISO shape, treating its hour as missing (review nit)', () => {
+    const response = asStatsV2Response({
+      intervals: ['2026-01-01T00:00:00Z', 'not-a-real-timestamp'],
+      groups: [{ series: { 'sum(quantity)': [5, 9] } }],
+    });
+    const grid = reconstructHourlyGrid(response, '2026-01-01T00:00:00Z', '2026-01-01T02:00:00Z');
+    expect(grid.values).toEqual([5, 0]);
+  });
 });
 
 describe('organizationStatsView', () => {

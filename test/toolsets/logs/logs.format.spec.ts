@@ -35,6 +35,14 @@ describe('isSensitiveAttributeKey', () => {
     ['clientIP', true],
     ['remoteAddr', true],
     ['network.peer.address', true],
+    // Review should-fix 3: acronym-run split, and ip\d* / ipv\d as sensitive on their own.
+    ['userIPAddress', true],
+    ['ipv4', true],
+    ['ipv6', true],
+    ['clientIp6', true],
+    ['ip4', true],
+    // A plain acronym-adjacent word that isn't otherwise sensitive stays that way.
+    ['HTTPMethod', false],
   ])('%s -> %s', (key, expected) => {
     expect(isSensitiveAttributeKey(key)).toBe(expected);
   });
@@ -88,6 +96,21 @@ describe('flattenAttributes', () => {
     const byKey = new Map(attributes.map((a) => [a.key, a.value]));
     expect(byKey.get('requests.0.client.address')).toBe('[redacted]');
     expect(byKey.get('requests.1.client.address')).toBe('[redacted]');
+  });
+
+  it('redacts element [1] of a [name, value] header pair whose name is sensitive (review should-fix 3)', () => {
+    const { attributes } = flattenAttributes({
+      headers: [
+        ['Cookie', 'session=secret'],
+        ['X-Forwarded-For', '203.0.113.9'],
+        ['User-Agent', 'test'],
+      ],
+    });
+    const byKey = new Map(attributes.map((a) => [a.key, a.value]));
+    expect(byKey.get('headers.0.1')).toBe('[redacted]');
+    expect(byKey.get('headers.1.1')).toBe('[redacted]');
+    expect(byKey.get('headers.2.1')).toBe('test');
+    expect(byKey.get('headers.0.0')).toBe('Cookie');
   });
 });
 

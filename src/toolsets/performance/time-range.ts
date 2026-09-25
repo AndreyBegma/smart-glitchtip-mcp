@@ -10,11 +10,12 @@ const UNIT_MS: Record<'m' | 'h' | 'd', number> = { m: 60_000, h: 3_600_000, d: 8
 /**
  * A strict ISO 8601 date-time: seconds and a fractional part are optional, the timezone
  * is not — `Z` or a numeric offset. Rejects a date-only string, an RFC 2822 date, and
- * anything else free-form; the calendar itself (Feb 30, a 13th month) is checked
+ * anything else free-form; the hour is bounded to 00–23 (`T24:00` is refused, not silently
+ * rolled to the next day); the calendar itself (Feb 30, a 13th month) is checked
  * separately, since a regex can bound digit counts but not which days a month has.
  */
 const STRICT_ISO =
-  /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 
 const DATE_TIME_DESCRIPTION =
   'ISO 8601 date-time with a timezone (Z or an offset), or the relative form "now" or ' +

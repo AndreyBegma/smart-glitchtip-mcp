@@ -57,19 +57,32 @@ const SENSITIVE_RUNS: readonly (readonly string[])[] = [
   ['peer', 'address'],
 ];
 
-/** Splits a dotted/underscored/dashed/camelCase key path into lowercase tokens. */
+/** A whole token that names an IP address by itself, digits and all: ip, ip4, ip6, ipv4, ipv6. */
+const IP_TOKEN = /^ipv?\d*$/;
+
+/**
+ * Splits a dotted/underscored/dashed/camelCase key path into lowercase tokens. Two boundary
+ * passes: `lowerUpper` splits an ordinary camelCase transition (`clientIp` → `client`/`Ip`);
+ * `acronymWord` then splits an acronym run from the capitalised word after it
+ * (`userIPAddress` → `user`/`IP`/`Address`, not one `ipaddress` blob) — without it, only the
+ * first letter of a run like `IPAddress` would ever separate from what follows.
+ */
 function tokenize(key: string): string[] {
-  const withBoundaries = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
-  return withBoundaries
+  const lowerUpper = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+  const acronymWord = lowerUpper.replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2');
+  return acronymWord
     .toLowerCase()
     .split(/[._-]+/)
     .filter(Boolean);
 }
 
-/** `key` is the full path from the attribute root (e.g. "user.geo.city", "clientIP"). Exported for its own unit tests. */
+/** `key` is the full path from the attribute root (e.g. "user.geo.city", "clientIP", "ipv4"). Exported for its own unit tests. */
 export function isSensitiveAttributeKey(key: string): boolean {
   const tokens = tokenize(key);
-  return SENSITIVE_RUNS.some((run) => containsRun(tokens, run));
+  return (
+    tokens.some((token) => IP_TOKEN.test(token)) ||
+    SENSITIVE_RUNS.some((run) => containsRun(tokens, run))
+  );
 }
 
 function containsRun(tokens: readonly string[], run: readonly string[]): boolean {
@@ -97,7 +110,10 @@ export function redactAttributesForJson(data: unknown): unknown {
 
 function redactValue(value: unknown, path: string): unknown {
   if (Array.isArray(value)) {
-    return value.map((item, i) => redactValue(item, path ? `${path}.${i}` : String(i)));
+    return value.map((item, i) => {
+      if (isHeaderPair(item)) return redactHeaderPair(item);
+      return redactValue(item, path ? `${path}.${i}` : String(i));
+    });
   }
   if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
@@ -107,6 +123,25 @@ function redactValue(value: unknown, path: string): unknown {
     return out;
   }
   return isSensitiveAttributeKey(path) ? REDACTED : value;
+}
+
+/**
+ * A `[name, value]` pair (a header represented as a 2-element array, the shape
+ * `event.redact.ts` also handles for events): the PII is in `name` itself, a data value
+ * rather than an object key, so the usual key-path check never sees it. Matched by shape,
+ * not by position in a larger structure, so it applies at any depth an array reaches.
+ */
+function isHeaderPair(item: unknown): item is [string, unknown, ...unknown[]] {
+  return (
+    Array.isArray(item) &&
+    item.length >= 2 &&
+    typeof item[0] === 'string' &&
+    isSensitiveAttributeKey(item[0])
+  );
+}
+
+function redactHeaderPair(pair: readonly unknown[]): unknown[] {
+  return [pair[0], REDACTED, ...pair.slice(2)];
 }
 
 interface FlatAttribute {
@@ -279,9 +314,20 @@ export function getLogView(log: LogEvent): View {
   };
 }
 
-/** Spec §Untrusted text: in `get_log`, a newline becomes ` ⏎ ` so structure stays visible. */
+/**
+ * Line/paragraph separators, built from code points rather than typed literally: like
+ * `sanitize.ts`'s own character classes, a raw U+2028/U+2029 in source is invisible and
+ * fragile through tooling (and a LineTerminator can't appear inside a regex literal at
+ * all). Spec §Untrusted text: in `get_log`, a newline — or either of these — becomes ` ⏎ `
+ * so structure stays visible instead of being collapsed away.
+ */
+const LINE_BREAK = new RegExp(
+  `\\r\\n|\\r|\\n|${String.fromCharCode(0x2028)}|${String.fromCharCode(0x2029)}`,
+  'g',
+);
+
 function detailBodyText(body: string): string {
-  const marked = body.replace(/\r\n|\r|\n/g, ' ⏎ ');
+  const marked = body.replace(LINE_BREAK, ' ⏎ ');
   return capText(marked.replace(/[ \t]+/g, ' ').trim(), BODY_DETAIL_LIMIT);
 }
 
@@ -307,7 +353,7 @@ export function getLogStatsView(
         const empty = `No log activity in the requested range (${range.start} to ${range.end}).`;
         return note ? untrusted('log_stats', `${empty}\n${note}`, 'glitchtip-event') : empty;
       }
-      const totals = series.map((s) => ({ name: flatten(s.name), total: sum(s.data, safeLength) }));
+      const totals = series.map((s) => ({ name: flatten(s.name), ...sum(s.data, safeLength) }));
       const busiest = series.map((s) => ({
         name: flatten(s.name),
         ...busiestBucket(s.data, intervals, safeLength),
@@ -322,6 +368,11 @@ export function getLogStatsView(
       if (note) lines.push(note);
       if (mismatched)
         lines.push('(series and intervals lengths differ; showing the common prefix)');
+      if (hasUnavailableValue(series, safeLength)) {
+        lines.push(
+          'Some values are unavailable (excluded from totals and the busiest bucket) — not the same as a known 0.',
+        );
+      }
       lines.push(`buckets (${bucketing}):`);
       lines.push(...bucketLines(intervals.slice(0, safeLength), series, safeLength, bucketing));
       return untrusted('log_stats', lines.join('\n'), 'glitchtip-event');
@@ -341,12 +392,30 @@ function hashBucketNoteText(filter: {
   return 'service and environment filters use hash buckets upstream and may include rare collisions.';
 }
 
-function sum(data: readonly number[] | null | undefined, length: number): number {
-  return (data ?? []).slice(0, length).reduce((acc, v) => acc + (typeof v === 'number' ? v : 0), 0);
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** True when any series has a non-number point in range — never silently counted as 0. */
+function hasUnavailableValue(
+  series: readonly { data?: readonly unknown[] | null }[],
+  length: number,
+): boolean {
+  return series.some((s) => (s.data ?? []).slice(0, length).some((v) => !isFiniteNumber(v)));
+}
+
+function sum(
+  data: readonly unknown[] | null | undefined,
+  length: number,
+): { readonly total: number } {
+  const total = (data ?? [])
+    .slice(0, length)
+    .reduce((acc: number, v) => acc + (isFiniteNumber(v) ? v : 0), 0);
+  return { total };
 }
 
 function busiestBucket(
-  data: readonly number[] | null | undefined,
+  data: readonly unknown[] | null | undefined,
   intervals: readonly string[],
   length: number,
 ): { readonly at: string | undefined; readonly value: number } {
@@ -354,8 +423,8 @@ function busiestBucket(
   let bestIndex = -1;
   let bestValue = -Infinity;
   for (let i = 0; i < values.length; i++) {
-    const v = typeof values[i] === 'number' ? values[i] : 0;
-    if (v > bestValue) {
+    const v = values[i];
+    if (isFiniteNumber(v) && v > bestValue) {
       bestValue = v;
       bestIndex = i;
     }
@@ -367,35 +436,43 @@ function busiestBucket(
 
 function bucketLines(
   intervals: readonly string[],
-  series: readonly { name: string; data?: readonly number[] | null }[],
+  series: readonly { name: string; data?: readonly unknown[] | null }[],
   length: number,
   bucketing: 'hour' | 'day',
 ): string[] {
   if (bucketing === 'hour') {
     return intervals.map((interval, i) => {
-      const counts = series.map((s) => `${flatten(s.name)}=${(s.data ?? [])[i] ?? 0}`).join(' ');
+      const counts = series
+        .map((s) => {
+          const v = (s.data ?? [])[i];
+          return `${flatten(s.name)}=${isFiniteNumber(v) ? v : '?'}`;
+        })
+        .join(' ');
       return `  ${interval}  ${counts}`;
     });
   }
-  const byDay = new Map<string, number[]>();
+  const byDay = new Map<string, { sums: number[]; known: boolean[] }>();
   const order: string[] = [];
   for (let i = 0; i < length; i++) {
     const day = (intervals[i] ?? '').slice(0, 10) || '-';
     if (!byDay.has(day)) {
-      byDay.set(
-        day,
-        series.map(() => 0),
-      );
+      byDay.set(day, { sums: series.map(() => 0), known: series.map(() => false) });
       order.push(day);
     }
-    const totals = byDay.get(day) as number[];
+    const entry = byDay.get(day) as { sums: number[]; known: boolean[] };
     series.forEach((s, si) => {
-      totals[si] += typeof (s.data ?? [])[i] === 'number' ? ((s.data as number[])[i] as number) : 0;
+      const v = (s.data ?? [])[i];
+      if (isFiniteNumber(v)) {
+        entry.sums[si] += v;
+        entry.known[si] = true;
+      }
     });
   }
   return order.map((day) => {
-    const totals = byDay.get(day) as number[];
-    const counts = series.map((s, si) => `${flatten(s.name)}=${totals[si]}`).join(' ');
+    const entry = byDay.get(day) as { sums: number[]; known: boolean[] };
+    const counts = series
+      .map((s, si) => `${flatten(s.name)}=${entry.known[si] ? entry.sums[si] : '?'}`)
+      .join(' ');
     return `  ${day}  ${counts}`;
   });
 }

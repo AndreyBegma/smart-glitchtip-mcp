@@ -52,6 +52,11 @@ describe('resolveDateTime', () => {
     expect(resolveDateTime('2026-01-01T00:00:30.123Z')).toBe('2026-01-01T00:00:30.123Z');
   });
 
+  it('rejects hour 24, rather than silently rolling over to the next day (review nit)', () => {
+    expect(resolveDateTime('2026-01-01T24:00:00Z')).toBeUndefined();
+    expect(resolveDateTime('2026-01-01T23:00:00Z')).toBe('2026-01-01T23:00:00.000Z');
+  });
+
   it('never throws on an absurd now-<n>d, failing validation instead', () => {
     // Out of Date's representable range, but the arithmetic itself stays finite.
     expect(() => resolveDateTime('now-9999999999d', FIXED_NOW)).not.toThrow();

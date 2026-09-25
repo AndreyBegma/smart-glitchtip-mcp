@@ -238,6 +238,24 @@ describe('get_log', () => {
     expect(text).toContain('line one ⏎ line two ⏎ line three');
   });
 
+  it('renders U+2028/U+2029 as ⏎ too, not only a literal \\n (review nit)', async () => {
+    const lineSeparator = String.fromCharCode(0x2028);
+    const paragraphSeparator = String.fromCharCode(0x2029);
+    const body = { ...LOG, body: `alpha${lineSeparator}beta${paragraphSeparator}gamma` };
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/logs/018f2a3b-0000-7000-8000-000000000001/`,
+      body,
+    );
+    const { text } = await call(mock, 'get_log', {
+      organization: 'acme',
+      log_id: '018f2a3b-0000-7000-8000-000000000001',
+    });
+    expect(text).toContain('alpha ⏎ beta ⏎ gamma');
+    expect(text).not.toContain(lineSeparator);
+    expect(text).not.toContain(paragraphSeparator);
+  });
+
   it('shows "?" for a traceID that is not hex32/UUID and a timestamp that is not strict ISO', async () => {
     const malformed = { ...LOG, traceID: 'not-a-trace-id', timestamp: 'yesterday' };
     const mock = new MockGlitchTip().json(
@@ -302,6 +320,23 @@ describe('get_log_stats', () => {
     });
     expect(text).toContain('totals: error=6');
     expect(text).toContain('error @ 2026-01-01T01:00:00Z (5)');
+  });
+
+  it('marks a non-number data point as unavailable, never a silent 0 (review nit)', async () => {
+    const stats = {
+      intervals: ['2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z'],
+      series: [{ name: 'error', data: [1, 'oops'] }],
+    };
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/logs/stats/`, stats);
+    const { text, isError } = await call(mock, 'get_log_stats', {
+      organization: 'acme',
+      start: '2026-01-01T00:00:00Z',
+      end: '2026-01-01T02:00:00Z',
+    });
+    expect(isError).toBe(false);
+    expect(text).toContain('totals: error=1');
+    expect(text).toContain('  2026-01-01T01:00:00Z  error=?');
+    expect(text).toContain('Some values are unavailable');
   });
 
   it('adds the hash-bucket note when service or environment is given', async () => {

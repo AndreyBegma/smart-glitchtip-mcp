@@ -85,11 +85,11 @@ export function transactionGroupDetailView(
     untrusted: { field: 'transaction', source: 'glitchtip-event' },
     text: () =>
       `${keyValues([
-        ['id', group.id],
+        ['id', num(group.id)],
         ['transaction', fencedField('transaction', group.transaction, TRANSACTION_LIST_LIMIT)],
         ['op', fencedField('op', group.op)],
         ['method', fencedField('method', group.method)],
-        ['project', group.project],
+        ['project', num(group.project)],
         ['count', num(group.count)],
         ['avgMs', num(group.avgDuration)],
         ['p50Ms', num(group.p50)],
