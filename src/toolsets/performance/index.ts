@@ -1,8 +1,9 @@
 import type { ToolsetDefinition } from '../toolset';
+import { PerformanceTools } from './performance.tools';
 
 export const toolset: ToolsetDefinition = {
   name: 'performance',
-  read: [],
+  read: [PerformanceTools],
   write: [],
-  available: false,
+  available: true,
 };

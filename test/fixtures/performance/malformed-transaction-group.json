@@ -1,0 +1,14 @@
+{
+  "project": 1,
+  "id": 42,
+  "transaction": "GET /api/x",
+  "op": "http.server",
+  "method": null,
+  "count": 10,
+  "avgDuration": 120.5,
+  "errorCount": 1,
+  "firstSeen": "2026-01-01T00:00:00Z",
+  "lastSeen": "2026-01-02T00:00:00Z",
+  "errorRate": 0.1,
+  "throughput": null
+}

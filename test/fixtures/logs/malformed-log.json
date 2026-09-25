@@ -1,0 +1,10 @@
+{
+  "id": "018f2a3b-0000-7000-8000-000000000001",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "level": "info",
+  "body": "started",
+  "service": null,
+  "environment": null,
+  "host": null,
+  "projectId": 1
+}

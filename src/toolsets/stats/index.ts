@@ -1,3 +1,9 @@
 import type { ToolsetDefinition } from '../toolset';
+import { StatsTools } from './stats.tools';
 
-export const toolset: ToolsetDefinition = { name: 'stats', read: [], write: [], available: false };
+export const toolset: ToolsetDefinition = {
+  name: 'stats',
+  read: [StatsTools],
+  write: [],
+  available: true,
+};
