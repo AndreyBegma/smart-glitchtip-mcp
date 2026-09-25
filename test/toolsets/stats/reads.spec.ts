@@ -63,7 +63,7 @@ describe('get_organization_stats', () => {
       organization: 'acme',
       category: 'transaction',
       start: '2026-01-01T00:00:00Z',
-      end: '2026-01-01T01:00:00Z',
+      end: '2026-01-01T02:00:00Z',
     });
     expect(text).toContain('total: 12');
     expect(text).toContain('peak: 2026-01-01T01:00:00Z (9)');

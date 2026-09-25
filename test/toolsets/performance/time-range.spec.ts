@@ -34,4 +34,31 @@ describe('resolveDateTime', () => {
     expect(resolveDateTime('now-1w')).toBeUndefined();
     expect(resolveDateTime('now+1h')).toBeUndefined();
   });
+
+  it('rejects an RFC 2822 date and other free text that Date.parse would otherwise accept', () => {
+    expect(resolveDateTime('Mon, 01 Jan 2026 00:00:00 GMT')).toBeUndefined();
+    expect(resolveDateTime('January 1, 2026')).toBeUndefined();
+    expect(resolveDateTime('2026/01/01T00:00:00Z')).toBeUndefined();
+  });
+
+  it('rejects a calendar date that does not exist, even though it matches the regex shape', () => {
+    expect(resolveDateTime('2026-02-30T00:00:00Z')).toBeUndefined();
+    expect(resolveDateTime('2026-13-01T00:00:00Z')).toBeUndefined();
+    expect(resolveDateTime('2026-00-01T00:00:00Z')).toBeUndefined();
+  });
+
+  it('accepts seconds and a fractional part when present', () => {
+    expect(resolveDateTime('2026-01-01T00:00:30Z')).toBe('2026-01-01T00:00:30.000Z');
+    expect(resolveDateTime('2026-01-01T00:00:30.123Z')).toBe('2026-01-01T00:00:30.123Z');
+  });
+
+  it('never throws on an absurd now-<n>d, failing validation instead', () => {
+    // Out of Date's representable range, but the arithmetic itself stays finite.
+    expect(() => resolveDateTime('now-9999999999d', FIXED_NOW)).not.toThrow();
+    expect(resolveDateTime('now-9999999999d', FIXED_NOW)).toBeUndefined();
+    // Large enough that amount * UNIT_MS overflows to Infinity.
+    const huge = `now-${'9'.repeat(300)}d`;
+    expect(() => resolveDateTime(huge, FIXED_NOW)).not.toThrow();
+    expect(resolveDateTime(huge, FIXED_NOW)).toBeUndefined();
+  });
 });

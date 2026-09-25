@@ -27,6 +27,14 @@ describe('isSensitiveAttributeKey', () => {
     ['service', false],
     ['http.method', false],
     ['duration_ms', false],
+    // Review: suffix match, not only a whole-path or single-segment equality.
+    ['http.request.header.x-forwarded-for', true],
+    ['req.remote_addr', true],
+    ['source.client.address', true],
+    // Review: camelCase split, and the OTel *.address / *.peer.address family.
+    ['clientIP', true],
+    ['remoteAddr', true],
+    ['network.peer.address', true],
   ])('%s -> %s', (key, expected) => {
     expect(isSensitiveAttributeKey(key)).toBe(expected);
   });
@@ -71,6 +79,15 @@ describe('flattenAttributes', () => {
   it('returns nothing for a non-object', () => {
     expect(flattenAttributes(null)).toEqual({ attributes: [], more: 0 });
     expect(flattenAttributes('oops')).toEqual({ attributes: [], more: 0 });
+  });
+
+  it('redacts through an array of objects, at any depth (review: recurse through arrays too)', () => {
+    const { attributes } = flattenAttributes({
+      requests: [{ client: { address: '203.0.113.9' } }, { client: { address: '203.0.113.10' } }],
+    });
+    const byKey = new Map(attributes.map((a) => [a.key, a.value]));
+    expect(byKey.get('requests.0.client.address')).toBe('[redacted]');
+    expect(byKey.get('requests.1.client.address')).toBe('[redacted]');
   });
 });
 

@@ -1,4 +1,5 @@
-import { keyValues, table, withCursor } from '../../format/table';
+import { flatten } from '../../format/sanitize';
+import { type Cell, keyValues, table, withCursor } from '../../format/table';
 import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
 import type { components } from '../../glitchtip/generated/schema';
@@ -10,10 +11,12 @@ type NPlusOnePattern = components['schemas']['NPlusOnePatternSchema'];
 type TransactionTrend = components['schemas']['TransactionTrendSchema'];
 
 // Views project GlitchTip's payloads down to the fields an agent uses (D-12). Transaction
-// names and span descriptions are untrusted (D-18, spec §Untrusted text): fenced with
-// untrusted(), never placed in a table cell (table()'s 80-char cellText cap could cut a
-// fence in half). Every field read here tolerates a malformed/partial response
-// (optional chaining, `?? '-'`) so a bad payload degrades the text, never throws.
+// names, span descriptions, `op` and `method` are all SDK-reported and therefore untrusted
+// (D-18, spec §Untrusted text) — every list here fences its whole rows section once, not per
+// cell or per row (spec §Untrusted text: "one fence per section, not one per cell"); a
+// single-object detail view fences each untrusted field individually instead, since it has
+// no rows to wrap. Every field read here tolerates a malformed/partial response so a bad
+// payload degrades the text, never throws.
 
 const TRANSACTION_LIST_LIMIT = 120;
 const SPAN_LIST_LIMIT = 160;
@@ -28,6 +31,11 @@ export function coldStorageEmptyMessage(range: string): string {
   );
 }
 
+/** The same caveat, for `format: "json"`, on the same four tools (review should-fix). */
+const COLD_STORAGE_JSON_NOTE =
+  'GlitchTip returns an empty list both when there is none and when its span storage is ' +
+  'unavailable or busy — this is not proof of absence.';
+
 /** `<start> to <end>`, or a one-sided/upstream-default phrase when either is omitted. */
 export function rangeLabel(start: string | undefined, end: string | undefined): string {
   if (start && end) return `${start} to ${end}`;
@@ -36,26 +44,31 @@ export function rangeLabel(start: string | undefined, end: string | undefined): 
   return 'the default range (last 7 days)';
 }
 
+// Small display guards so a malformed field degrades to "?" in text instead of printing
+// "undefined"/"NaN"; `undefined`/`null` pass through so keyValues/table can still drop or
+// dash a field that is legitimately absent, rather than showing "?" for it.
+
+function num(value: unknown): number | '?' | undefined {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === 'number' && Number.isFinite(value) ? value : '?';
+}
+
+const STRICT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+function iso(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === 'string' && STRICT_ISO.test(value) ? value : '?';
+}
+
 export function transactionGroupListView(page: Page<TransactionGroup>, org: string): View {
   const groups = page.items;
   return {
     untrusted: { field: 'transactions', source: 'glitchtip-event' },
     text: () => {
       if (groups.length === 0) return `No transaction groups match in ${org}.`;
-      const body = table(groups, [
-        { header: 'id', value: (g) => g.id },
-        { header: 'op', value: (g) => g.op },
-        { header: 'method', value: (g) => g.method },
-        { header: 'count', value: (g) => g.count },
-        { header: 'avgMs', value: (g) => g.avgDuration },
-        { header: 'p50Ms', value: (g) => g.p50 },
-        { header: 'p95Ms', value: (g) => g.p95 },
-        { header: 'errorRate%', value: (g) => percent(g.errorRate) },
-        { header: 'throughput', value: (g) => g.throughput },
-        { header: 'lastSeen', value: (g) => g.lastSeen },
-        { header: 'project', value: (g) => g.project },
-      ]);
-      return withCursor(withFencedField(body, groups, transactionText), page.nextCursor);
+      return withCursor(
+        fencedRowsBlock('transactions', groups, transactionColumns, transactionSuffix),
+        page.nextCursor,
+      );
     },
     json: () => ({
       transactions: groups.map((g) => transactionGroupProjection(g)),
@@ -64,26 +77,29 @@ export function transactionGroupListView(page: Page<TransactionGroup>, org: stri
   };
 }
 
-export function transactionGroupDetailView(group: TransactionGroup): View {
+export function transactionGroupDetailView(
+  group: TransactionGroup,
+  transactionGroupId: number,
+): View {
   return {
     untrusted: { field: 'transaction', source: 'glitchtip-event' },
     text: () =>
       `${keyValues([
         ['id', group.id],
-        ['transaction', transactionText(group)],
-        ['op', group.op],
-        ['method', group.method],
+        ['transaction', fencedField('transaction', group.transaction, TRANSACTION_LIST_LIMIT)],
+        ['op', fencedField('op', group.op)],
+        ['method', fencedField('method', group.method)],
         ['project', group.project],
-        ['count', group.count],
-        ['avgMs', group.avgDuration],
-        ['p50Ms', group.p50],
-        ['p95Ms', group.p95],
+        ['count', num(group.count)],
+        ['avgMs', num(group.avgDuration)],
+        ['p50Ms', num(group.p50)],
+        ['p95Ms', num(group.p95)],
         ['errorRate%', percent(group.errorRate)],
-        ['errorCount', group.errorCount],
-        ['throughput', group.throughput],
-        ['firstSeen', group.firstSeen],
-        ['lastSeen', group.lastSeen],
-      ])}\nSpans: list_transaction_spans(${group.id}); daily trend: get_transaction_trend(${group.id}).`,
+        ['errorCount', num(group.errorCount)],
+        ['throughput', num(group.throughput)],
+        ['firstSeen', iso(group.firstSeen)],
+        ['lastSeen', iso(group.lastSeen)],
+      ])}\nSpans: list_transaction_spans(${transactionGroupId}); daily trend: get_transaction_trend(${transactionGroupId}).`,
     json: () => transactionGroupProjection(group),
   };
 }
@@ -94,16 +110,12 @@ export function spanGroupListView(spans: readonly SpanGroup[], emptyRange: strin
     untrusted: { field: 'spans', source: 'glitchtip-event' },
     text: () => {
       if (spans.length === 0) return coldStorageEmptyMessage(emptyRange);
-      const body = table(spans, [
-        { header: 'op', value: (s) => s.op },
-        { header: 'count', value: (s) => s.count },
-        { header: 'avgMs', value: (s) => s.avgDuration },
-        { header: 'p95Ms', value: (s) => s.p95Duration },
-        { header: 'totalMs', value: (s) => s.totalTime },
-      ]);
-      return withFencedField(body, spans, spanDescriptionText);
+      return fencedRowsBlock('spans', spans, spanColumns, spanSuffix);
     },
-    json: () => ({ spans: spans.map((s) => spanGroupProjection(s)) }),
+    json: () =>
+      spans.length === 0
+        ? emptyJson('spans', COLD_STORAGE_JSON_NOTE)
+        : { spans: spans.map((s) => spanGroupProjection(s)) },
   };
 }
 
@@ -114,21 +126,24 @@ export function transactionTrendView(rows: readonly TransactionTrend[], emptyRan
       if (rows.length === 0) return coldStorageEmptyMessage(emptyRange);
       return table(rows, [
         { header: 'date', value: (r) => day(r.date) },
-        { header: 'transactions', value: (r) => r.transactionCount },
-        { header: 'spans', value: (r) => r.count },
-        { header: 'avgMs', value: (r) => r.avgDuration },
-        { header: 'totalMs', value: (r) => r.totalTime },
+        { header: 'transactions', value: (r) => num(r.transactionCount) },
+        { header: 'spans', value: (r) => num(r.count) },
+        { header: 'avgMs', value: (r) => num(r.avgDuration) },
+        { header: 'totalMs', value: (r) => num(r.totalTime) },
       ]);
     },
-    json: () => ({
-      trend: rows.map((r) => ({
-        date: r.date,
-        transactions: r.transactionCount,
-        spans: r.count,
-        avgMs: r.avgDuration,
-        totalMs: r.totalTime,
-      })),
-    }),
+    json: () =>
+      rows.length === 0
+        ? emptyJson('trend', COLD_STORAGE_JSON_NOTE)
+        : {
+            trend: rows.map((r) => ({
+              date: r.date,
+              transactions: r.transactionCount,
+              spans: r.count,
+              avgMs: r.avgDuration,
+              totalMs: r.totalTime,
+            })),
+          },
   };
 }
 
@@ -137,37 +152,92 @@ export function nPlusOneListView(patterns: readonly NPlusOnePattern[], emptyRang
     untrusted: { field: 'patterns', source: 'glitchtip-event' },
     text: () => {
       if (patterns.length === 0) return coldStorageEmptyMessage(emptyRange);
-      const body = table(patterns, [
-        { header: 'op', value: (p) => p.op },
-        { header: 'spansPerTxn', value: (p) => p.spansPerTxn },
-        { header: 'txnCount', value: (p) => p.transactionCount },
-        { header: 'totalSpans', value: (p) => p.totalSpans },
-        { header: 'avgMs', value: (p) => p.avgDuration },
-        { header: 'totalMs', value: (p) => p.totalTime },
-      ]);
-      const [header, ...lines] = body.split('\n');
-      const withFields = lines.map((line, i) => {
-        const p = patterns[i];
-        return (
-          `${line}  ${untrusted('patterns.transactionName', truncate(p?.transactionName, TRANSACTION_LIST_LIMIT))}` +
-          `  ${untrusted('patterns.description', truncate(p?.description, SPAN_LIST_LIMIT))}`
-        );
-      });
-      return [header, ...withFields].join('\n');
+      return fencedRowsBlock('patterns', patterns, patternColumns, patternSuffix);
     },
-    json: () => ({
-      patterns: patterns.map((p) => ({
-        transactionName: p.transactionName,
-        op: p.op,
-        description: p.description,
-        spansPerTxn: p.spansPerTxn,
-        transactionCount: p.transactionCount,
-        totalSpans: p.totalSpans,
-        avgMs: p.avgDuration,
-        totalMs: p.totalTime,
-      })),
-    }),
+    json: () =>
+      patterns.length === 0
+        ? emptyJson('patterns', COLD_STORAGE_JSON_NOTE)
+        : {
+            patterns: patterns.map((p) => ({
+              transactionName: p.transactionName,
+              op: p.op,
+              description: p.description,
+              spansPerTxn: p.spansPerTxn,
+              transactionCount: p.transactionCount,
+              totalSpans: p.totalSpans,
+              avgMs: p.avgDuration,
+              totalMs: p.totalTime,
+            })),
+          },
   };
+}
+
+function emptyJson(field: string, note: string): Record<string, unknown> {
+  return { [field]: [], note };
+}
+
+// Column sets (safe, non-untrusted fields only — op/method/description/name are appended as
+// untrusted text after the table, inside the one fence that wraps the whole section).
+
+const transactionColumns = [
+  { header: 'id', value: (g: TransactionGroup) => g.id },
+  { header: 'count', value: (g: TransactionGroup) => num(g.count) },
+  { header: 'avgMs', value: (g: TransactionGroup) => num(g.avgDuration) },
+  { header: 'p50Ms', value: (g: TransactionGroup) => num(g.p50) },
+  { header: 'p95Ms', value: (g: TransactionGroup) => num(g.p95) },
+  { header: 'errorRate%', value: (g: TransactionGroup) => percent(g.errorRate) },
+  { header: 'throughput', value: (g: TransactionGroup) => num(g.throughput) },
+  { header: 'lastSeen', value: (g: TransactionGroup) => iso(g.lastSeen) },
+  { header: 'project', value: (g: TransactionGroup) => g.project },
+];
+
+function transactionSuffix(g: TransactionGroup | undefined): string {
+  return (
+    `op=${flat(g?.op)} method=${flat(g?.method)} ` +
+    `transaction=${truncate(g?.transaction, TRANSACTION_LIST_LIMIT)}`
+  );
+}
+
+const spanColumns = [
+  { header: 'count', value: (s: SpanGroup) => num(s.count) },
+  { header: 'avgMs', value: (s: SpanGroup) => num(s.avgDuration) },
+  { header: 'p95Ms', value: (s: SpanGroup) => num(s.p95Duration) },
+  { header: 'totalMs', value: (s: SpanGroup) => num(s.totalTime) },
+];
+
+function spanSuffix(s: SpanGroup | undefined): string {
+  return `op=${flat(s?.op)} description=${truncate(s?.description, SPAN_LIST_LIMIT)}`;
+}
+
+const patternColumns = [
+  { header: 'spansPerTxn', value: (p: NPlusOnePattern) => num(p.spansPerTxn) },
+  { header: 'txnCount', value: (p: NPlusOnePattern) => num(p.transactionCount) },
+  { header: 'totalSpans', value: (p: NPlusOnePattern) => num(p.totalSpans) },
+  { header: 'avgMs', value: (p: NPlusOnePattern) => num(p.avgDuration) },
+  { header: 'totalMs', value: (p: NPlusOnePattern) => num(p.totalTime) },
+];
+
+function patternSuffix(p: NPlusOnePattern | undefined): string {
+  return (
+    `op=${flat(p?.op)} transaction=${truncate(p?.transactionName, TRANSACTION_LIST_LIMIT)} ` +
+    `description=${truncate(p?.description, SPAN_LIST_LIMIT)}`
+  );
+}
+
+/**
+ * Builds a table of safe columns, appends an untrusted suffix per row, and wraps the whole
+ * header+rows block in exactly one fence (spec: one fence per section, not one per cell).
+ */
+function fencedRowsBlock<Row>(
+  field: string,
+  rows: readonly Row[],
+  columns: ReadonlyArray<{ header: string; value: (row: Row) => Cell }>,
+  suffix: (row: Row | undefined) => string,
+): string {
+  const body = table(rows, columns);
+  const [header, ...lines] = body.split('\n');
+  const withSuffix = lines.map((line, i) => `${line}  ${suffix(rows[i])}`);
+  return untrusted(field, [header, ...withSuffix].join('\n'), 'glitchtip-event');
 }
 
 function transactionGroupProjection(g: TransactionGroup): unknown {
@@ -200,23 +270,13 @@ function spanGroupProjection(s: SpanGroup): unknown {
   };
 }
 
-/** Splits a table's body into its header and rows, appending a fenced field to each row. */
-function withFencedField<Row>(
-  body: string,
-  rows: readonly Row[],
-  text: (row: Row) => string,
-): string {
-  const [header, ...lines] = body.split('\n');
-  const withField = lines.map((line, i) => `${line}  ${text(rows[i] as Row)}`);
-  return [header, ...withField].join('\n');
-}
-
-function transactionText(g: TransactionGroup | undefined): string {
-  return untrusted('transaction', truncate(g?.transaction, TRANSACTION_LIST_LIMIT));
-}
-
-function spanDescriptionText(s: SpanGroup | undefined): string {
-  return untrusted('description', truncate(s?.description, SPAN_LIST_LIMIT));
+function fencedField(
+  field: string,
+  value: string | null | undefined,
+  limit = FIELD_CAP,
+): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return untrusted(field, truncate(value, limit));
 }
 
 function percent(rate: number | null | undefined): string {
@@ -228,12 +288,13 @@ function percentValue(rate: number | null | undefined): number | null {
   return typeof rate === 'number' ? Math.round(rate * 10_000) / 100 : null;
 }
 
-function day(iso: string | null | undefined): string {
-  return iso ? iso.slice(0, 10) : '-';
+function day(isoValue: string | null | undefined): string {
+  const value = iso(isoValue);
+  return value ? value.slice(0, 10) : '-';
 }
 
-function flatten(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+function flat(text: string | null | undefined): string {
+  return flatten(text ?? '');
 }
 
 /** Bounds a single field's length, independent of the whole-response budget. */

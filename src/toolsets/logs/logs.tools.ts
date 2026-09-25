@@ -23,13 +23,21 @@ export const LOGS_READ_SCOPES = ['event:read', 'event:write', 'event:admin'] as 
 const DEFAULT_LOOKBACK_MS = 7 * 86_400_000;
 const MAX_LOG_STATS_RANGE_DAYS = 90;
 
-/** Upstream default (last 7 days) mirrored locally so an empty message can name a range. */
+/**
+ * Upstream default mirrored locally, so an empty message (and the 90-day check below) can
+ * name the range actually queried: a missing `start` defaults to *now* minus 7 days and a
+ * missing `end` defaults to *now*, each independent of whether the other bound was given
+ * (`apps/logs/api.py`: `start_dt = filters.start or (now - timedelta(days=7))`). Tying a
+ * missing `start` to the *given* `end` instead — a one-sided range — would hide a range
+ * that is actually huge from the day-count check below.
+ */
 function effectiveRange(
   start: string | undefined,
   end: string | undefined,
 ): { start: string; end: string } {
-  const endIso = end ?? new Date().toISOString();
-  const startIso = start ?? new Date(Date.parse(endIso) - DEFAULT_LOOKBACK_MS).toISOString();
+  const now = Date.now();
+  const startIso = start ?? new Date(now - DEFAULT_LOOKBACK_MS).toISOString();
+  const endIso = end ?? new Date(now).toISOString();
   return { start: startIso, end: endIso };
 }
 
@@ -81,8 +89,11 @@ const getLogStatsArgs = z
   })
   .superRefine((data, ctx) => {
     checkTimeRange(data, ctx);
-    if (data.start === undefined || data.end === undefined) return;
-    const days = (Date.parse(data.end) - Date.parse(data.start)) / 86_400_000;
+    // The 90-day cap applies to the *effective* range: a one-sided start (end defaults to
+    // now) or a wholly-omitted range (both default) must be checked too, not only when the
+    // caller happens to give both bounds explicitly.
+    const range = effectiveRange(data.start, data.end);
+    const days = (Date.parse(range.end) - Date.parse(range.start)) / 86_400_000;
     if (days > MAX_LOG_STATS_RANGE_DAYS) {
       ctx.addIssue({
         code: 'custom',
@@ -180,7 +191,9 @@ export class LogsTools {
 
   @Tool({
     name: 'get_log_stats',
-    description: 'Log volume per level over time. Scope: event:read, event:write or event:admin.',
+    description:
+      'Log volume per level over time. ' +
+      `Scope: event:read, event:write or event:admin. ${UNTRUSTED_NOTE}`,
     parameters: getLogStatsArgs,
     annotations: { title: 'Get log stats', ...READ_ONLY },
   })

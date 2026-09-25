@@ -1,3 +1,4 @@
+import { flatten } from '../../format/sanitize';
 import { keyValues, table, withCursor } from '../../format/table';
 import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
@@ -10,15 +11,17 @@ type LogResource = components['schemas']['LogResourceSchema'];
 
 // Views project GlitchTip's payloads down to the fields an agent uses (D-12). Log body,
 // service, environment, host, spanID, resource names, and every attribute key/value in
-// `data` are untrusted (D-18, spec §Untrusted text) — fenced with untrusted(), never placed
-// in a table cell. `list_logs` fences its whole rows section once, not per cell (spec §Tools:
-// "one fence per section, not one per cell"); every other list here fences per row like the
-// performance toolset, since it has at most one untrusted field per row.
+// `data` are untrusted (D-18, spec §Untrusted text) — every list here fences its whole rows
+// section once, not per cell or per row (spec §Untrusted text: "one fence per section, not
+// one per cell"), and `get_log`'s attribute block is fenced the same way, once, rather than
+// per line — a per-line fence could nest or be forged by a crafted key.
 //
-// PII in log attributes (spec §PII in logs, D-20's rule applied to logs): a key whose dotted
-// path (nesting, or a literal OTel-style dotted name — both look the same once joined)
-// contains a sensitive segment, or matches a known compound name outright, has its value
-// replaced everywhere: text and json alike. The body is never redacted — free text can't be.
+// PII in log attributes (spec §PII in logs, D-20's rule applied to logs): a key matches when
+// its full dotted/underscored/camelCase path, tokenised, contains a sensitive run of tokens
+// contiguously anywhere — including as a trailing suffix, so `http.request.header.
+// x-forwarded-for`, `source.client.address` and `clientIP` all match, not only an exact bare
+// segment. The value is replaced everywhere: text and json alike, recursing through objects
+// *and* arrays at any depth. The body is never redacted — free text can't be.
 
 const BODY_LIST_LIMIT = 300;
 const BODY_DETAIL_LIMIT = 4000;
@@ -27,25 +30,54 @@ const FIELD_CAP = 2000;
 const RESOURCE_LIMIT = 100;
 
 const REDACTED = '[redacted]';
-/** A bare segment (after splitting on `.`, `_`, `-`) that makes the whole key sensitive. */
-const SEGMENT_MATCH = new Set(['ip', 'cookie', 'cookies', 'authorization', 'geo']);
-/** A full key not already caught by SEGMENT_MATCH alone (e.g. "client.address"). */
-const EXACT_MATCH = new Set([
-  'ip_address',
-  'client.address',
-  'remote_addr',
-  'x-forwarded-for',
-  'x-real-ip',
-  'set-cookie',
-  'proxy-authorization',
-  'user.geo',
-]);
 
-/** `key` is the full dotted path from the attribute root (e.g. "user.geo.city"). Exported for its own unit tests. */
+/**
+ * Sensitive token runs: a key matches when its tokenised path contains one of these,
+ * contiguously, anywhere. A bare single-token name (`ip`, `geo`, …) catches most of D-20's
+ * list on its own; the multi-token runs exist for the compound names a single-token check
+ * would miss (`client.address`, `remote_addr`), and the OTel `*.address` / `*.peer.address`
+ * family the review asked to add explicitly, on top of the single `address` token, which
+ * already covers them.
+ */
+const SENSITIVE_RUNS: readonly (readonly string[])[] = [
+  ['ip'],
+  ['cookie'],
+  ['cookies'],
+  ['authorization'],
+  ['geo'],
+  ['address'],
+  ['ip', 'address'],
+  ['client', 'address'],
+  ['remote', 'addr'],
+  ['x', 'forwarded', 'for'],
+  ['x', 'real', 'ip'],
+  ['set', 'cookie'],
+  ['proxy', 'authorization'],
+  ['user', 'geo'],
+  ['peer', 'address'],
+];
+
+/** Splits a dotted/underscored/dashed/camelCase key path into lowercase tokens. */
+function tokenize(key: string): string[] {
+  const withBoundaries = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+  return withBoundaries
+    .toLowerCase()
+    .split(/[._-]+/)
+    .filter(Boolean);
+}
+
+/** `key` is the full path from the attribute root (e.g. "user.geo.city", "clientIP"). Exported for its own unit tests. */
 export function isSensitiveAttributeKey(key: string): boolean {
-  const lower = key.toLowerCase();
-  if (EXACT_MATCH.has(lower)) return true;
-  return lower.split(/[._-]/).some((segment) => SEGMENT_MATCH.has(segment));
+  const tokens = tokenize(key);
+  return SENSITIVE_RUNS.some((run) => containsRun(tokens, run));
+}
+
+function containsRun(tokens: readonly string[], run: readonly string[]): boolean {
+  if (run.length > tokens.length) return false;
+  for (let start = 0; start <= tokens.length - run.length; start++) {
+    if (run.every((token, i) => tokens[start + i] === token)) return true;
+  }
+  return false;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -53,24 +85,28 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * `format: "json"`: a deep clone of `data` with every sensitive leaf value replaced in
- * place, structure kept (a plain object is always recursed into, however its own key
- * reads — `user.geo.city` and `user.geo` are each judged on their own full path). Exported
- * for its own unit tests.
+ * `format: "json"`, and the base every text rendering builds from: a deep clone of `data`
+ * with every sensitive leaf value replaced, recursing through objects *and* arrays at any
+ * depth. A leaf is judged on its own full path, never a collapsed ancestor — `user.geo.city`
+ * and `user.geo` are each checked independently. Exported for its own unit tests.
  */
 export function redactAttributesForJson(data: unknown): unknown {
-  if (!isPlainObject(data)) return data ?? null;
-  return redactObject(data, '');
+  const result = redactValue(data, '');
+  return result === undefined ? null : result;
 }
 
-function redactObject(record: Record<string, unknown>, prefix: string): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (isPlainObject(value)) out[key] = redactObject(value, path);
-    else out[key] = isSensitiveAttributeKey(path) ? REDACTED : value;
+function redactValue(value: unknown, path: string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item, i) => redactValue(item, path ? `${path}.${i}` : String(i)));
   }
-  return out;
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value)) {
+      out[key] = redactValue(v, path ? `${path}.${key}` : key);
+    }
+    return out;
+  }
+  return isSensitiveAttributeKey(path) ? REDACTED : value;
 }
 
 interface FlatAttribute {
@@ -83,8 +119,8 @@ const MAX_ATTRIBUTES = 50;
 const VALUE_CAP = 200;
 
 /**
- * Text rendering (`get_log`): `data` flattened to `key = value` lines, nested objects dotted
- * up to MAX_DEPTH, sensitive values redacted, at most MAX_ATTRIBUTES lines. Exported for its
+ * Text rendering (`get_log`): the redacted clone (above) flattened to `key = value` lines,
+ * objects and arrays dotted up to MAX_DEPTH, at most MAX_ATTRIBUTES lines. Exported for its
  * own unit tests.
  */
 export function flattenAttributes(data: unknown): {
@@ -92,37 +128,70 @@ export function flattenAttributes(data: unknown): {
   readonly more: number;
 } {
   const all: FlatAttribute[] = [];
-  if (isPlainObject(data)) flattenInto(data, '', 1, all);
+  const redacted = redactAttributesForJson(data);
+  // Only a genuine attributes container is flattened: `data` missing, null or some other
+  // non-object shape renders no attributes at all, not one spurious "(root) = -" line.
+  if (isPlainObject(redacted) || Array.isArray(redacted)) flattenValue(redacted, '', 0, all);
   const attributes = all.slice(0, MAX_ATTRIBUTES);
   return { attributes, more: Math.max(0, all.length - attributes.length) };
 }
 
-function flattenInto(
-  record: Record<string, unknown>,
-  prefix: string,
-  depth: number,
-  out: FlatAttribute[],
-): void {
-  for (const [key, value] of Object.entries(record)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (isPlainObject(value) && depth < MAX_DEPTH) {
-      flattenInto(value, path, depth + 1, out);
-    } else {
-      const redacted = isSensitiveAttributeKey(path);
-      out.push({ key: path, value: redacted ? REDACTED : capText(displayValue(value), VALUE_CAP) });
+function flattenValue(value: unknown, path: string, depth: number, out: FlatAttribute[]): void {
+  if (depth < MAX_DEPTH && Array.isArray(value)) {
+    if (value.length === 0) {
+      out.push({ key: path || '(root)', value: '[]' });
+      return;
     }
+    value.forEach((item, i) => {
+      flattenValue(item, path ? `${path}.${i}` : String(i), depth + 1, out);
+    });
+    return;
   }
+  if (depth < MAX_DEPTH && isPlainObject(value)) {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      out.push({ key: path || '(root)', value: '{}' });
+      return;
+    }
+    for (const [key, v] of entries) {
+      flattenValue(v, path ? `${path}.${flatten(key)}` : flatten(key), depth + 1, out);
+    }
+    return;
+  }
+  out.push({ key: path || '(root)', value: capText(flatten(displayValue(value)), VALUE_CAP) });
 }
 
 function displayValue(value: unknown): string {
   if (value === null || value === undefined) return '-';
   if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '?';
+  if (typeof value === 'boolean') return String(value);
   try {
     return JSON.stringify(value);
   } catch {
     return String(value);
   }
+}
+
+// Small display guards so a malformed field degrades to "?" in text instead of printing
+// "undefined"/"NaN" or a raw non-conforming value; `undefined`/`null` pass through so
+// keyValues can still drop a field that is legitimately absent, rather than showing "?".
+
+function num(value: unknown): number | '?' | undefined {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === 'number' && Number.isFinite(value) ? value : '?';
+}
+
+const STRICT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+function iso(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === 'string' && STRICT_ISO.test(value) ? value : '?';
+}
+
+const TRACE_ID = /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+function traceIdText(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === 'string' && TRACE_ID.test(value) ? value : '?';
 }
 
 export function listLogsView(
@@ -134,8 +203,9 @@ export function listLogsView(
   return {
     untrusted: { field: 'logs', source: 'glitchtip-event' },
     text: () => {
-      if (logs.length === 0)
+      if (logs.length === 0) {
         return `No logs match in ${org} between ${range.start} and ${range.end}.`;
+      }
       const hitLine = hitCountLine(page.headers);
       const fenced = untrusted('logs', rowsBlock(logs), 'glitchtip-event');
       return withCursor(hitLine ? `${hitLine}\n${fenced}` : fenced, page.nextCursor);
@@ -149,7 +219,7 @@ export function listLogsView(
 
 function rowsBlock(logs: readonly LogEvent[]): string {
   const body = table(logs, [
-    { header: 'timestamp', value: (l) => l.timestamp },
+    { header: 'timestamp', value: (l) => iso(l.timestamp) },
     { header: 'level', value: (l) => l.level },
     { header: 'service', value: (l) => l.service },
     { header: 'project', value: (l) => l.projectId },
@@ -157,7 +227,7 @@ function rowsBlock(logs: readonly LogEvent[]): string {
   ]);
   const [header, ...lines] = body.split('\n');
   const withBody = lines.map(
-    (line, i) => `${line}  ${flatten(logs[i]?.body ?? '', BODY_LIST_LIMIT)}`,
+    (line, i) => `${line}  ${capText(flatten(logs[i]?.body ?? ''), BODY_LIST_LIMIT)}`,
   );
   return [header, ...withBody].join('\n');
 }
@@ -172,22 +242,26 @@ export function getLogView(log: LogEvent): View {
   const { attributes, more } = flattenAttributes(log.data);
   const attributeLines = attributes.map((a) => `  ${a.key} = ${a.value}`);
   if (more > 0) attributeLines.push(`  … ${more} more attributes`);
+  const attributesBlock =
+    attributeLines.length > 0
+      ? untrusted('log.attributes', attributeLines.join('\n'), 'glitchtip-event')
+      : '(none)';
   return {
     untrusted: { field: 'log', source: 'glitchtip-event' },
     text: () =>
       `${keyValues([
         ['id', log.id],
-        ['timestamp', log.timestamp],
+        ['timestamp', iso(log.timestamp)],
         ['level', log.level],
         ['project', log.projectId],
         ['service', fenced('service', log.service)],
         ['environment', fenced('environment', log.environment)],
         ['host', fenced('host', log.host)],
-        ['traceID', log.traceID],
+        ['traceID', traceIdText(log.traceID)],
         ['spanID', fenced('spanID', log.spanID)],
-        ['severityNumber', log.severityNumber],
-        ['body', fenced('body', log.body, BODY_DETAIL_LIMIT)],
-      ])}\nattributes:\n${attributeLines.length > 0 ? attributeLines.join('\n') : '  (none)'}`,
+        ['severityNumber', num(log.severityNumber)],
+        ['body', untrusted('body', detailBodyText(log.body ?? ''), 'glitchtip-event')],
+      ])}\nattributes:\n${attributesBlock}`,
     json: () => ({
       id: log.id,
       timestamp: log.timestamp,
@@ -205,6 +279,12 @@ export function getLogView(log: LogEvent): View {
   };
 }
 
+/** Spec §Untrusted text: in `get_log`, a newline becomes ` ⏎ ` so structure stays visible. */
+function detailBodyText(body: string): string {
+  const marked = body.replace(/\r\n|\r|\n/g, ' ⏎ ');
+  return capText(marked.replace(/[ \t]+/g, ' ').trim(), BODY_DETAIL_LIMIT);
+}
+
 export function getLogStatsView(
   stats: LogStats,
   range: { readonly start: string; readonly end: string },
@@ -219,17 +299,17 @@ export function getLogStatsView(
   const length = Math.min(intervals.length, ...series.map((s) => (s.data ?? []).length), Infinity);
   const safeLength = Number.isFinite(length) ? length : intervals.length;
   const mismatched = series.some((s) => (s.data ?? []).length !== intervals.length);
+  const note = hashBucketNoteText(hashBucketNote);
   return {
     untrusted: { field: 'log_stats', source: 'glitchtip-event' },
     text: () => {
-      const note = hashBucketNoteText(hashBucketNote);
       if (intervals.length === 0 || series.length === 0) {
         const empty = `No log activity in the requested range (${range.start} to ${range.end}).`;
-        return note ? `${empty}\n${note}` : empty;
+        return note ? untrusted('log_stats', `${empty}\n${note}`, 'glitchtip-event') : empty;
       }
-      const totals = series.map((s) => ({ name: s.name, total: sum(s.data, safeLength) }));
+      const totals = series.map((s) => ({ name: flatten(s.name), total: sum(s.data, safeLength) }));
       const busiest = series.map((s) => ({
-        name: s.name,
+        name: flatten(s.name),
         ...busiestBucket(s.data, intervals, safeLength),
       }));
       const lines: string[] = [];
@@ -244,7 +324,7 @@ export function getLogStatsView(
         lines.push('(series and intervals lengths differ; showing the common prefix)');
       lines.push(`buckets (${bucketing}):`);
       lines.push(...bucketLines(intervals.slice(0, safeLength), series, safeLength, bucketing));
-      return lines.join('\n');
+      return untrusted('log_stats', lines.join('\n'), 'glitchtip-event');
     },
     json: () => ({
       intervals: intervals.slice(0, safeLength),
@@ -293,7 +373,7 @@ function bucketLines(
 ): string[] {
   if (bucketing === 'hour') {
     return intervals.map((interval, i) => {
-      const counts = series.map((s) => `${s.name}=${(s.data ?? [])[i] ?? 0}`).join(' ');
+      const counts = series.map((s) => `${flatten(s.name)}=${(s.data ?? [])[i] ?? 0}`).join(' ');
       return `  ${interval}  ${counts}`;
     });
   }
@@ -315,7 +395,7 @@ function bucketLines(
   }
   return order.map((day) => {
     const totals = byDay.get(day) as number[];
-    const counts = series.map((s, si) => `${s.name}=${totals[si]}`).join(' ');
+    const counts = series.map((s, si) => `${flatten(s.name)}=${totals[si]}`).join(' ');
     return `  ${day}  ${counts}`;
   });
 }
@@ -335,11 +415,13 @@ export function listLogResourcesView(
       }
       const body = table(resources, [
         { header: 'type', value: (r) => r.type },
-        { header: 'lastSeen', value: (r) => r.lastSeen },
+        { header: 'lastSeen', value: (r) => iso(r.lastSeen) },
       ]);
       const [header, ...lines] = body.split('\n');
-      const withName = lines.map((line, i) => `${line}  ${fenced('name', resources[i]?.name)}`);
-      const rendered = [header, ...withName].join('\n');
+      const withName = lines.map(
+        (line, i) => `${line}  ${capText(flatten(resources[i]?.name ?? ''), FIELD_CAP)}`,
+      );
+      const rendered = untrusted('resources', [header, ...withName].join('\n'), 'glitchtip-event');
       return resources.length >= RESOURCE_LIMIT
         ? `${rendered}\n(latest ${RESOURCE_LIMIT})`
         : rendered;
@@ -351,12 +433,7 @@ export function listLogResourcesView(
 }
 
 function fenced(field: string, value: string | null | undefined, limit = FIELD_CAP): string {
-  return untrusted(field, flatten(value ?? '', limit));
-}
-
-function flatten(text: string, limit: number): string {
-  const collapsed = text.replace(/\s+/g, ' ').trim();
-  return collapsed.length > limit ? `${collapsed.slice(0, limit - 1)}…` : collapsed;
+  return untrusted(field, capText(flatten(value ?? ''), limit));
 }
 
 function capText(text: string, limit: number): string {
@@ -370,6 +447,6 @@ function logProjection(log: LogEvent): unknown {
     level: log.level,
     service: log.service,
     projectId: log.projectId,
-    body: capText(log.body ?? '', BODY_LIST_LIMIT),
+    body: log.body,
   };
 }

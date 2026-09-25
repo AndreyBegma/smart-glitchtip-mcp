@@ -12,13 +12,22 @@ import type { View } from '../../format/tool-output';
 // ANY(project_ids) OR stat IS NULL`, so an hour where matching rows exist only for *other*
 // projects on the instance has every row filtered out by that WHERE clause and the whole
 // GROUP BY bucket for that hour vanishes from the response (spec §Risks). This module
-// reconstructs the full hourly grid from the request's own start/end and fills any hour
-// missing from the response with 0, borrowing the UTC offset of a neighbouring returned
-// interval for the synthesized ones (the endpoint renders every interval in the server's
-// fixed local timezone — spec: "the tool renders them as received... and does not convert").
+// reconstructs the full hourly grid for the half-open range `[start, end)` and fills any
+// hour *missing from `intervals` entirely* with 0 — the correct count for the requested
+// projects, per the spec. An hour that IS present in `intervals` but whose series value is
+// missing (the series array is shorter, a genuinely malformed response rather than the
+// documented gap above) is marked unavailable instead: a different kind of absence, and
+// confidently reporting it as 0 would be a false "no events" (review should-fix, rule 7 —
+// an empty result and a failure must not look alike). Ruling on the grid's own boundary
+// (review): `[start, end)` in whole hours — 00:00–03:00 is three buckets, not four; this
+// server does not reproduce the endpoint's own internal `end + 1h` SQL boundary, which has
+// no user-facing meaning of its own.
 
 const HOUR_MS = 3_600_000;
 const FIELD = 'sum(quantity)';
+
+/** `null` marks a genuinely unavailable bucket — never confused with a known 0. */
+type BucketValue = number | null;
 
 interface StatsV2Response {
   readonly intervals: readonly string[];
@@ -44,10 +53,14 @@ export function asStatsV2Response(value: unknown): StatsV2Response {
 
 export interface HourlyGrid {
   readonly hours: readonly string[];
-  readonly values: readonly number[];
+  readonly values: readonly BucketValue[];
 }
 
-/** Reconstructs one value per hour from `start` to `end`, filling any gap with 0. */
+/**
+ * One value per hour over `[start, end)`. A hour absent from `intervals` is the documented
+ * upstream gap and becomes 0; an hour present in `intervals` whose series value is missing
+ * (index beyond a too-short series array) becomes `null` — unavailable, not zero.
+ */
 export function reconstructHourlyGrid(
   response: StatsV2Response,
   start: string,
@@ -55,26 +68,30 @@ export function reconstructHourlyGrid(
 ): HourlyGrid {
   const series = response.groups[0]?.series?.[FIELD];
   const data = Array.isArray(series) ? series : [];
-  const returned = new Map<number, { iso: string; value: number }>();
-  let offset: string | undefined;
-  const length = Math.min(response.intervals.length, data.length);
-  for (let i = 0; i < length; i++) {
+  const returned = new Map<number, { iso: string; value: BucketValue }>();
+  for (let i = 0; i < response.intervals.length; i++) {
     const iso = response.intervals[i];
     const instant = Date.parse(iso);
     if (Number.isNaN(instant)) continue;
-    offset ??= offsetOf(iso);
-    const raw = data[i];
-    returned.set(truncateHour(instant), { iso, value: typeof raw === 'number' ? raw : 0 });
+    const value: BucketValue =
+      i < data.length ? (typeof data[i] === 'number' ? (data[i] as number) : 0) : null;
+    returned.set(truncateHour(instant), { iso, value });
   }
-  const fallbackOffset = offset ?? 'Z';
   const startHour = truncateHour(Date.parse(start));
-  const endHour = truncateHour(Date.parse(end) + HOUR_MS);
+  const endHour = truncateHour(Date.parse(end));
   const hours: string[] = [];
-  const values: number[] = [];
-  for (let t = startHour; t <= endHour; t += HOUR_MS) {
+  const values: BucketValue[] = [];
+  let lastOffset = 'Z';
+  for (let t = startHour; t < endHour; t += HOUR_MS) {
     const found = returned.get(t);
-    hours.push(found?.iso ?? formatWithOffset(t, fallbackOffset));
-    values.push(found?.value ?? 0);
+    if (found) {
+      lastOffset = offsetOf(found.iso);
+      hours.push(found.iso);
+      values.push(found.value);
+    } else {
+      hours.push(formatWithOffset(t, lastOffset));
+      values.push(0);
+    }
   }
   return { hours, values };
 }
@@ -105,22 +122,35 @@ function formatWithOffset(ms: number, offset: string): string {
   return `${date}T${time}${offset}`;
 }
 
+/** A day is unavailable only when every hour in it is; a mix sums just the known hours. */
 function rollupToDays(
   hours: readonly string[],
-  values: readonly number[],
-): Array<[string, number]> {
-  const byDay = new Map<string, number>();
+  values: readonly BucketValue[],
+): Array<[string, BucketValue]> {
+  const sums = new Map<string, number>();
+  const known = new Map<string, boolean>();
   const order: string[] = [];
   for (let i = 0; i < hours.length; i++) {
     const day = hours[i]?.slice(0, 10) || '-';
-    if (!byDay.has(day)) {
-      byDay.set(day, 0);
+    if (!sums.has(day)) {
+      sums.set(day, 0);
+      known.set(day, false);
       order.push(day);
     }
-    byDay.set(day, (byDay.get(day) as number) + values[i]);
+    const value = values[i];
+    if (value !== null) {
+      sums.set(day, (sums.get(day) as number) + value);
+      known.set(day, true);
+    }
   }
-  return order.map((day) => [day, byDay.get(day) as number]);
+  return order.map((day) => [day, known.get(day) ? (sums.get(day) as number) : null]);
 }
+
+function num(value: unknown): number | '?' {
+  return typeof value === 'number' && Number.isFinite(value) ? value : '?';
+}
+
+const bucketText = (value: BucketValue): string => (value === null ? 'unavailable' : String(value));
 
 export function organizationStatsView(
   raw: unknown,
@@ -133,25 +163,30 @@ export function organizationStatsView(
   },
 ): View {
   const grid = reconstructHourlyGrid(asStatsV2Response(raw), args.start, args.end);
-  const buckets: Array<[string, number]> =
+  const buckets: Array<[string, BucketValue]> =
     args.bucket === 'hour'
-      ? grid.hours.map((h, i) => [h, grid.values[i] ?? 0])
+      ? grid.hours.map((h, i): [string, BucketValue] => [h, grid.values[i] ?? null])
       : rollupToDays(grid.hours, grid.values);
-  const total = grid.values.reduce((sum, v) => sum + v, 0);
-  const peak = buckets.reduce<[string, number] | undefined>(
-    (best, bucket) => (best === undefined || bucket[1] > best[1] ? bucket : best),
-    undefined,
-  );
+  const knownValues = grid.values.filter((v): v is number => v !== null);
+  const total = knownValues.reduce((sum, v) => sum + v, 0);
+  const peak = buckets.reduce<[string, number] | undefined>((best, [bucket, value]) => {
+    if (value === null) return best;
+    return best === undefined || value > best[1] ? [bucket, value] : best;
+  }, undefined);
+  const anyUnavailable = grid.values.some((v) => v === null);
   return {
     text: () => {
       const header = keyValues([
         ['category', args.category],
         ['range', `${args.start} to ${args.end}`],
-        ['total', total],
+        ['total', num(total)],
         ['peak', peak ? `${peak[0]} (${peak[1]})` : '-'],
       ]);
-      const lines = buckets.map(([bucket, value]) => `  ${bucket}  ${value}`);
-      return `${header}\nbuckets (${args.bucket}):\n${lines.join('\n')}`;
+      const lines = buckets.map(([bucket, value]) => `  ${bucket}  ${bucketText(value)}`);
+      const note = anyUnavailable
+        ? '\nSome buckets are unavailable (the response did not carry a value for them) — not the same as a known 0.'
+        : '';
+      return `${header}\nbuckets (${args.bucket}):\n${lines.join('\n')}${note}`;
     },
     json: () => ({
       category: args.category,

@@ -69,8 +69,9 @@ describe('list_transaction_groups', () => {
     expect(mock.requests[0].url.pathname).toBe('/api/0/organizations/acme/transaction-groups/');
     expect(mock.requests[0].url.searchParams.get('sort')).toBe('-avg_duration');
     expect(mock.requests[0].url.searchParams.get('limit')).toBe('25');
-    expect(text).toContain('<untrusted source="glitchtip-event" field="transaction">');
-    expect(text).toContain('GET /api/x');
+    expect(text).toContain('<untrusted source="glitchtip-event" field="transactions">');
+    expect(text).toContain('op=http.server method=GET transaction=GET /api/x');
+    expect(text.match(/<untrusted/g) ?? []).toHaveLength(1);
   });
 
   it('says so when no groups match, without isError', async () => {
@@ -206,6 +207,43 @@ describe('get_transaction_group', () => {
     );
   });
 
+  it('fences op and method individually (review blocker 6)', async () => {
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/transaction-groups/42/`,
+      GROUP,
+    );
+    const { text } = await call(mock, 'get_transaction_group', {
+      organization: 'acme',
+      transaction_group_id: 42,
+    });
+    expect(text).toContain(
+      'op: <untrusted source="glitchtip-event" field="op">http.server</untrusted>',
+    );
+    expect(text).toContain(
+      'method: <untrusted source="glitchtip-event" field="method">GET</untrusted>',
+    );
+  });
+
+  it('the hint line uses the requested id, not a response field (review should-fix)', async () => {
+    // A malformed response with the wrong id must not derail the hint's own tool call.
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/transaction-groups/42/`,
+      {
+        ...GROUP,
+        id: 999,
+      },
+    );
+    const { text } = await call(mock, 'get_transaction_group', {
+      organization: 'acme',
+      transaction_group_id: 42,
+    });
+    expect(text).toContain(
+      'Spans: list_transaction_spans(42); daily trend: get_transaction_trend(42).',
+    );
+  });
+
   it('maps 404 to the enhanced message', async () => {
     const mock = new MockGlitchTip().json(
       'GET',
@@ -233,8 +271,8 @@ describe('list_transaction_spans', () => {
       organization: 'acme',
       transaction_group_id: 42,
     });
-    expect(text).toContain('<untrusted source="glitchtip-event" field="description">');
-    expect(text).toContain('SELECT * FROM x');
+    expect(text).toContain('<untrusted source="glitchtip-event" field="spans">');
+    expect(text).toContain('op=db.query description=SELECT * FROM x');
   });
 
   it('on an empty list, 404 on the follow-up yields the not-found message (acceptance 8)', async () => {
@@ -269,7 +307,8 @@ describe('list_span_groups', () => {
     const { text } = await call(mock, 'list_span_groups', { organization: 'acme' });
     expect(mock.requests[0].url.searchParams.get('sort')).toBe('-total_time');
     expect(mock.requests[0].url.searchParams.get('limit')).toBe('25');
-    expect(text).toContain('<untrusted source="glitchtip-event" field="description">');
+    expect(text).toContain('<untrusted source="glitchtip-event" field="spans">');
+    expect(text).toContain('op=db.query description=SELECT * FROM x');
   });
 
   it('empty list reads the cold-storage sentence, not a plain "no match"', async () => {
@@ -277,6 +316,15 @@ describe('list_span_groups', () => {
     const { text, isError } = await call(mock, 'list_span_groups', { organization: 'acme' });
     expect(isError).toBe(false);
     expect(text).toContain('this is not proof of absence.');
+  });
+
+  it('keeps the "not proof of absence" note in format: json too (review should-fix)', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/span-groups/`, []);
+    const { text } = await call(mock, 'list_span_groups', { organization: 'acme', format: 'json' });
+    const inner = /<untrusted[^>]*>([\s\S]*)<\/untrusted>/.exec(text)?.[1] ?? '';
+    const parsed = JSON.parse(inner) as { spans: unknown[]; note: string };
+    expect(parsed.spans).toEqual([]);
+    expect(parsed.note).toContain('not proof of absence');
   });
 
   it('turns a 403 into an actionable tool error', async () => {
@@ -303,7 +351,7 @@ describe('list_n_plus_one_patterns', () => {
     expect(mock.requests[0].url.searchParams.get('limit')).toBe('25');
   });
 
-  it('fences both the transaction name and the description per row', async () => {
+  it('fences op, the transaction name and the description in one wrapping section', async () => {
     const pattern = {
       transactionName: 'GET /api/x',
       op: 'db',
@@ -318,8 +366,28 @@ describe('list_n_plus_one_patterns', () => {
       pattern,
     ]);
     const { text } = await call(mock, 'list_n_plus_one_patterns', { organization: 'acme' });
-    expect(text).toContain('<untrusted source="glitchtip-event" field="patterns.transactionName">');
-    expect(text).toContain('<untrusted source="glitchtip-event" field="patterns.description">');
+    expect(text).toContain('<untrusted source="glitchtip-event" field="patterns">');
+    expect(text).toContain('op=db transaction=GET /api/x description=SELECT * FROM x');
+    expect(text.match(/<untrusted/g) ?? []).toHaveLength(1);
+  });
+
+  it('empty list reads the cold-storage sentence, and keeps the json note (review should-fix)', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/n-plus-one/`, []);
+    const { text, isError } = await call(mock, 'list_n_plus_one_patterns', {
+      organization: 'acme',
+    });
+    expect(isError).toBe(false);
+    expect(text).toContain('this is not proof of absence.');
+
+    const mock2 = new MockGlitchTip().json('GET', `${API}/organizations/acme/n-plus-one/`, []);
+    const { text: jsonText } = await call(mock2, 'list_n_plus_one_patterns', {
+      organization: 'acme',
+      format: 'json',
+    });
+    const inner = /<untrusted[^>]*>([\s\S]*)<\/untrusted>/.exec(jsonText)?.[1] ?? '';
+    const parsed = JSON.parse(inner) as { patterns: unknown[]; note: string };
+    expect(parsed.patterns).toEqual([]);
+    expect(parsed.note).toContain('not proof of absence');
   });
 
   it('turns a 401 into an actionable tool error', async () => {
@@ -357,6 +425,21 @@ describe('get_transaction_trend', () => {
     });
     expect(text).toContain('2026-01-01');
     expect(text).toContain('5');
+  });
+
+  it('keeps the "not proof of absence" note in format: json when the group exists but is empty', async () => {
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/organizations/acme/transaction-groups/42/trend/`, [])
+      .json('GET', `${API}/organizations/acme/transaction-groups/42/`, GROUP);
+    const { text } = await call(mock, 'get_transaction_trend', {
+      organization: 'acme',
+      transaction_group_id: 42,
+      format: 'json',
+    });
+    const inner = /<untrusted[^>]*>([\s\S]*)<\/untrusted>/.exec(text)?.[1] ?? '';
+    const parsed = JSON.parse(inner) as { trend: unknown[]; note: string };
+    expect(parsed.trend).toEqual([]);
+    expect(parsed.note).toContain('not proof of absence');
   });
 
   it('on an empty list, 404 on the follow-up yields the not-found message', async () => {

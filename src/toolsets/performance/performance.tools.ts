@@ -178,7 +178,10 @@ export class PerformanceTools {
       org,
       args.transaction_group_id,
     );
-    return this.output.render(args.format, transactionGroupDetailView(group));
+    return this.output.render(
+      args.format,
+      transactionGroupDetailView(group, args.transaction_group_id),
+    );
   }
 
   @Tool({
@@ -205,7 +208,9 @@ export class PerformanceTools {
           },
         }),
     );
-    if (spans.length === 0) await this.ensureTransactionGroupExists(glitchtip, org, args);
+    if (Array.isArray(spans) && spans.length === 0) {
+      await this.ensureTransactionGroupExists(glitchtip, org, args);
+    }
     return this.output.render(
       args.format,
       spanGroupListView(spans, rangeLabel(args.start, args.end)),
@@ -311,7 +316,9 @@ export class PerformanceTools {
           },
         }),
     );
-    if (trend.length === 0) await this.ensureTransactionGroupExists(glitchtip, org, args);
+    if (Array.isArray(trend) && trend.length === 0) {
+      await this.ensureTransactionGroupExists(glitchtip, org, args);
+    }
     return this.output.render(
       args.format,
       transactionTrendView(trend, rangeLabel(args.start, args.end)),

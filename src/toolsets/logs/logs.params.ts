@@ -27,9 +27,13 @@ export const levelsParam = z
 
 export const logIdParam = z.string().uuid().describe('Log id (UUID), from list_logs.');
 
+/** Exactly 32 hex characters, or a UUID — nothing looser (review: the old regex accepted
+ * any 8–36 character run of hex digits and dashes, which is not the same thing). */
+const TRACE_ID = /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
 export const traceIdParam = z
   .string()
-  .regex(/^[0-9a-fA-F-]{8,36}$/, 'must be a 32-hex or UUID trace id')
+  .regex(TRACE_ID, 'must be a 32-hex or UUID trace id')
   .optional()
   .describe('Trace id (32 hex or UUID) to correlate logs across services.');
 
