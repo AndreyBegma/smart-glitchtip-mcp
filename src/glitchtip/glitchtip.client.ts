@@ -13,6 +13,7 @@ import {
 } from './glitchtip.errors';
 import type { ResolvedInstance } from './instance.context';
 import { type Page, parseNextCursor } from './pagination';
+import type { Redactor } from './redactor';
 import {
   assertCallerHeaders,
   pathSegmentGuard,
@@ -48,6 +49,12 @@ export interface CallOptions {
    * for the rare call that is legitimately slow, such as a large upload.
    */
   readonly timeoutMs?: number;
+  /**
+   * Secrets the caller holds besides the token (webhook URLs, invite links).
+   * Removed, like the token, from error details before they are cut to size,
+   * and from a raw call's body and headers.
+   */
+  readonly extraSecrets?: readonly string[];
 }
 
 export interface RawRequestOptions extends CallOptions {
@@ -117,7 +124,8 @@ export class GlitchTipClient {
   ): Promise<Page<T>> {
     const result = await this.perform(operation, request, options);
     if (!Array.isArray(result.data)) throw malformedListError(operation);
-    const headers = this.redactedHeaders(result.response.headers);
+    const redactor = this.instance.redactor(options?.extraSecrets);
+    const headers = redactedHeaders(result.response.headers, redactor);
     return { items: result.data, nextCursor: parseNextCursor(headers.get('link')), headers };
   }
 
@@ -143,20 +151,18 @@ export class GlitchTipClient {
     const url = rawRequestUrl(this.instance.url, operation, path, options.query);
     assertCallerHeaders(options.headers ?? {});
     const request = buildRawRequest(url, verb, this.defaultHeaders(), options);
+    const redactor = this.instance.redactor(options.extraSecrets);
     try {
       const response = await this.send(request, timeoutMs);
-      const text = this.instance.redact(await response.text());
-      return { status: response.status, headers: this.redactedHeaders(response.headers), text };
+      const text = redactor.redact(await response.text());
+      return {
+        status: response.status,
+        headers: redactedHeaders(response.headers, redactor),
+        text,
+      };
     } catch (error) {
-      throw this.asGlitchTipError(error, timeoutMs);
+      throw this.asGlitchTipError(error, timeoutMs, redactor);
     }
-  }
-
-  /** A copy of response headers with the token removed from every value. */
-  private redactedHeaders(headers: Headers): Headers {
-    const copy = new Headers();
-    for (const [name, value] of headers) copy.append(name, this.instance.redact(value));
-    return copy;
   }
 
   private async perform<T>(
@@ -166,22 +172,24 @@ export class GlitchTipClient {
   ): Promise<ApiResult<T>> {
     const timeoutMs = this.timeoutFor(options);
     const api = timeoutMs === this.options.timeoutMs ? this.api : this.createApi(timeoutMs);
+    const redactor = this.instance.redactor(options.extraSecrets);
     let result: ApiResult<T>;
     try {
       result = await request(api);
     } catch (error) {
-      throw this.asGlitchTipError(error, timeoutMs);
+      throw this.asGlitchTipError(error, timeoutMs, redactor);
     }
     const { response } = result;
     if (response.ok) return result;
-    throw this.redacted(
-      errorFromResponse(
-        response.status,
-        result.error,
-        operation,
-        retryAfterSeconds(response.headers.get('retry-after')),
-      ),
+    const mapped = errorFromResponse(
+      response.status,
+      result.error,
+      operation,
+      redactor,
+      retryAfterSeconds(response.headers.get('retry-after')),
     );
+    // The detail is redacted already; the message may also quote the operation.
+    throw redacted(mapped, redactor);
   }
 
   /**
@@ -240,18 +248,11 @@ export class GlitchTipClient {
     return RETRY_BASE_MS * 2 ** attempt + Math.floor(this.random() * RETRY_BASE_MS);
   }
 
-  private asGlitchTipError(error: unknown, timeoutMs: number): GlitchTipError {
-    if (error instanceof GlitchTipError) return this.redacted(error);
+  private asGlitchTipError(error: unknown, timeoutMs: number, redactor: Redactor): GlitchTipError {
+    if (error instanceof GlitchTipError) return redacted(error, redactor);
     if (isTimeout(error)) return timeoutError(timeoutMs);
     if (error instanceof SyntaxError) return malformedResponseError();
     return unreachableError(this.instance.origin);
-  }
-
-  private redacted(error: GlitchTipError): GlitchTipError {
-    const message = this.instance.redact(error.message);
-    const detail = error.detail === undefined ? undefined : this.instance.redact(error.detail);
-    if (message === error.message && detail === error.detail) return error;
-    return new GlitchTipError(error.kind, message, error.status, detail);
   }
 
   private defaultHeaders(): Record<string, string> {
@@ -304,6 +305,20 @@ function rawBody(body: unknown, headers: Headers): RequestInit['body'] {
   } catch {
     throw refusedRequestError('The body cannot be sent as JSON.');
   }
+}
+
+function redacted(error: GlitchTipError, redactor: Redactor): GlitchTipError {
+  const message = redactor.redact(error.message);
+  const detail = error.detail === undefined ? undefined : redactor.redact(error.detail);
+  if (message === error.message && detail === error.detail) return error;
+  return new GlitchTipError(error.kind, message, error.status, detail);
+}
+
+/** A copy of response headers with every secret removed from every value. */
+function redactedHeaders(headers: Headers, redactor: Redactor): Headers {
+  const copy = new Headers();
+  for (const [name, value] of headers) copy.append(name, redactor.redact(value));
+  return copy;
 }
 
 function isRetryableStatus(status: number): boolean {

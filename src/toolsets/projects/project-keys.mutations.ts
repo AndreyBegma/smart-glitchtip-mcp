@@ -8,7 +8,7 @@ import { InstanceResolver } from '../../glitchtip/instance.resolver';
 import { formatParam, mutation, organizationParam } from '../../mcp/tool-params';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
 import { changedProjectKeyView } from './projects.format';
-import { PROJECT_ADMIN_SCOPES, PROJECT_WRITE_SCOPES } from './projects.mutations';
+import { notPreserved, PROJECT_ADMIN_SCOPES, PROJECT_WRITE_SCOPES } from './projects.mutations';
 import { keyIdParam, projectParam, rateLimitParam } from './projects.params';
 import { PROJECT_READ_SCOPES } from './projects.tools';
 
@@ -41,6 +41,25 @@ const deleteProjectKeyArgs = z.object({
     .describe('Must equal `key_id` exactly; guards against deleting the wrong key.'),
   format: formatParam,
 });
+
+/**
+ * The key's current label: GlitchTip's canonical field is `label`, and `name`
+ * may be absent. The first that is text wins, then a `null`; `undefined` when
+ * neither is usable.
+ */
+function currentLabel(name: unknown, label: unknown): string | null | undefined {
+  const candidates = [name, label];
+  const text = candidates.find((value) => typeof value === 'string');
+  if (typeof text === 'string') return text;
+  return candidates.includes(null) ? null : undefined;
+}
+
+function isRateLimitOrNull(value: unknown): boolean {
+  if (value === null) return true;
+  if (typeof value !== 'object') return false;
+  const { window, count } = value as Record<string, unknown>;
+  return Number.isFinite(window) && Number.isFinite(count);
+}
 
 @GlitchTipTools()
 export class ProjectKeysMutations {
@@ -116,6 +135,18 @@ export class ProjectKeysMutations {
           },
         }),
     );
+    // The PUT is full-replace: a field the read lacks, or carries with the wrong type,
+    // refuses unless the caller gives it (AGENTS.md rule 15).
+    const label = args.label ?? currentLabel(current.name, current.label);
+    if (label === undefined) {
+      const read = current.label === undefined ? current.name : current.label;
+      return error(notPreserved('label', 'label', read, 'text or null'));
+    }
+    const rateLimit = args.rate_limit !== undefined ? args.rate_limit : current.rateLimit;
+    if (!isRateLimitOrNull(rateLimit)) {
+      return error(notPreserved('rateLimit', 'rate_limit', rateLimit, 'a rate limit or null'));
+    }
+    const body = { name: label, rateLimit };
     const updated = await glitchtip.client.call(
       {
         name: 'update project key',
@@ -129,10 +160,7 @@ export class ProjectKeysMutations {
           params: {
             path: { organization_slug: org, project_slug: args.project, key_id: args.key_id },
           },
-          body: {
-            name: args.label ?? current.name,
-            rateLimit: args.rate_limit !== undefined ? args.rate_limit : current.rateLimit,
-          },
+          body,
         }),
     );
     return this.output.render(
