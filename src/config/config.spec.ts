@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TOOLSET_NAMES } from '../toolsets/toolset';
 import { ConfigError, configWarnings, loadConfig } from './config';
 import { normalizeInstanceUrl } from './instance-url';
@@ -52,10 +55,10 @@ describe('loadConfig', () => {
     );
   });
 
-  it('expands toolsets=all', () => {
-    expect(loadConfig({ ...STDIO, GLITCHTIP_TOOLSETS: 'all' }).toolsets).toEqual([
-      ...TOOLSET_NAMES,
-    ]);
+  it('expands toolsets=all (uploads needs an upload root, see below)', () => {
+    expect(loadConfig({ ...STDIO, GLITCHTIP_TOOLSETS: 'all' }).toolsets).toEqual(
+      TOOLSET_NAMES.filter((name) => name !== 'uploads'),
+    );
   });
 
   it('refuses an unknown toolset and lists the valid names', () => {
@@ -125,6 +128,131 @@ describe('configWarnings', () => {
 
   it('is silent for a complete configuration', () => {
     expect(configWarnings(loadConfig(STDIO))).toEqual([]);
+  });
+});
+
+describe('uploads (D-22)', () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'sgm-config-'));
+    mkdirSync(join(dir, 'root'));
+    writeFileSync(join(dir, 'file'), 'x');
+    symlinkSync(join(dir, 'root'), join(dir, 'link'));
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  const root = () => join(dir, 'root');
+  const HTTP = { MCP_TRANSPORT: 'http' };
+  const withRoot = (env: NodeJS.ProcessEnv, toolsets: string) =>
+    loadConfig({ ...env, GLITCHTIP_TOOLSETS: toolsets, GLITCHTIP_UPLOAD_ROOT: root() });
+
+  it('defaults the size cap to 256 MiB and leaves the root unset', () => {
+    expect(loadConfig(STDIO).uploads).toEqual({ root: undefined, maxBytes: 268_435_456 });
+  });
+
+  it('stores the root as its realpath', () => {
+    const config = loadConfig({ ...STDIO, GLITCHTIP_UPLOAD_ROOT: join(dir, 'link') });
+    expect(config.uploads.root).toBe(realpathSync(root()));
+  });
+
+  it.each([
+    ['relative', () => 'root', 'must be an absolute path'],
+    ['missing', () => join(dir, 'nope'), 'must be an existing directory'],
+    ['a file', () => join(dir, 'file'), 'must be a directory, not a file'],
+    ['the filesystem root', () => '/', 'must not be the filesystem root'],
+  ])('refuses a root that is %s, whatever the toolsets', (_, value, reason) => {
+    const problems = problemsOf({ ...STDIO, GLITCHTIP_UPLOAD_ROOT: value() });
+    expect(problems).toEqual([`GLITCHTIP_UPLOAD_ROOT: ${reason}`]);
+  });
+
+  it.each([
+    ['0', false],
+    ['1', true],
+    ['2147483648', true],
+    ['2147483649', false],
+  ])('bounds GLITCHTIP_UPLOAD_MAX_BYTES (%s)', (value, ok) => {
+    const env = { ...STDIO, GLITCHTIP_UPLOAD_MAX_BYTES: value };
+    if (ok) expect(loadConfig(env).uploads.maxBytes).toBe(Number(value));
+    else expect(problemsOf(env)[0]).toMatch(/^GLITCHTIP_UPLOAD_MAX_BYTES: /);
+  });
+
+  it('records how the toolsets were chosen', () => {
+    expect(withRoot(STDIO, 'uploads')).toMatchObject({
+      toolsetsMode: 'explicit',
+      toolsetsExplicit: true,
+    });
+    expect(loadConfig({ ...STDIO, GLITCHTIP_TOOLSETS: 'all' })).toMatchObject({
+      toolsetsMode: 'all',
+      toolsetsExplicit: false,
+    });
+    expect(loadConfig(STDIO)).toMatchObject({ toolsetsMode: 'default', toolsetsExplicit: false });
+  });
+
+  it('refuses uploads named explicitly in http mode', () => {
+    expect(problemsOf({ ...HTTP, GLITCHTIP_TOOLSETS: 'issues,uploads' })).toEqual([
+      'GLITCHTIP_TOOLSETS: The uploads toolset reads local files and is available in stdio mode only (D-06). Remove it from GLITCHTIP_TOOLSETS.',
+    ]);
+  });
+
+  it('refuses uploads named explicitly in stdio without a root, naming the key', () => {
+    expect(problemsOf({ ...STDIO, GLITCHTIP_TOOLSETS: 'uploads' })).toEqual([
+      'GLITCHTIP_UPLOAD_ROOT: required when GLITCHTIP_TOOLSETS names uploads',
+    ]);
+  });
+
+  it('keeps uploads named explicitly in stdio with a root', () => {
+    const config = withRoot(STDIO, 'uploads');
+    expect(config.toolsets).toEqual(['uploads']);
+    expect(configWarnings(config)).toEqual([]);
+  });
+
+  it('includes uploads in all, in stdio, with a root', () => {
+    const config = withRoot(STDIO, 'all');
+    expect(config.toolsets).toEqual([...TOOLSET_NAMES]);
+    expect(configWarnings(config)).toEqual([]);
+  });
+
+  it('leaves uploads out of all in http mode, with one warning', () => {
+    const config = withRoot(HTTP, 'all');
+    expect(config.toolsets).not.toContain('uploads');
+    expect(config.toolsets).toHaveLength(TOOLSET_NAMES.length - 1);
+    expect(configWarnings(config)).toEqual([
+      'GLITCHTIP_TOOLSETS=all leaves out the uploads toolset: it reads local files and is available in stdio mode only (D-06).',
+    ]);
+  });
+
+  it('leaves uploads out of all in stdio without a root, with one warning', () => {
+    const config = loadConfig({ ...STDIO, GLITCHTIP_TOOLSETS: 'all' });
+    expect(config.toolsets).not.toContain('uploads');
+    expect(configWarnings(config)).toEqual([
+      'GLITCHTIP_TOOLSETS=all leaves out the uploads toolset: GLITCHTIP_UPLOAD_ROOT is not set.',
+    ]);
+  });
+
+  it.each([
+    ['http', { MCP_TRANSPORT: 'http' }, 'stdio mode only'],
+    ['stdio without a root', STDIO, 'GLITCHTIP_UPLOAD_ROOT: required'],
+  ])('treats all,uploads as naming uploads explicitly (%s)', (_, env, problem) => {
+    const problems = problemsOf({ ...env, GLITCHTIP_TOOLSETS: 'all,uploads' });
+    expect(problems).toEqual([expect.stringContaining(problem)]);
+    expect(withRoot(STDIO, 'all,uploads')).toMatchObject({
+      toolsets: [...TOOLSET_NAMES],
+      toolsetsMode: 'explicit',
+      toolsetsExplicit: true,
+    });
+  });
+
+  it('warns when GLITCHTIP_UPLOAD_ROOT is set but uploads is not enabled', () => {
+    expect(configWarnings(withRoot(STDIO, 'issues'))).toEqual([
+      'GLITCHTIP_UPLOAD_ROOT is set but the uploads toolset is not enabled, so it has no effect; add uploads to GLITCHTIP_TOOLSETS.',
+    ]);
+    const unset = loadConfig({ ...STDIO, GLITCHTIP_UPLOAD_ROOT: root() });
+    expect(configWarnings(unset)).toHaveLength(1);
+  });
+
+  it('does not warn about uploads when the toolsets are the defaults', () => {
+    const config = loadConfig({ ...HTTP, MCP_AUTH_TOKEN: 'a'.repeat(16), GLITCHTIP_TOKEN: 't' });
+    expect(configWarnings(config)).toEqual([]);
   });
 });
 
