@@ -62,11 +62,40 @@ const updateProjectArgs = z
  * the read left out refuses the call (AGENTS.md rule 15); a `null` is re-sent.
  */
 const UPDATE_PROJECT_FIELDS = [
-  { field: 'name', param: 'name' },
-  { field: 'slug', param: 'new_slug' },
-  { field: 'platform', param: 'platform' },
-  { field: 'eventThrottleRate', param: 'event_throttle_rate' },
+  { field: 'name', param: 'name', kind: 'text', usable: isText },
+  { field: 'slug', param: 'new_slug', kind: 'text or null', usable: isTextOrNull },
+  { field: 'platform', param: 'platform', kind: 'text or null', usable: isTextOrNull },
+  {
+    field: 'eventThrottleRate',
+    param: 'event_throttle_rate',
+    kind: 'a number or null',
+    usable: (value: unknown) => value === null || Number.isFinite(value),
+  },
 ] as const;
+
+function isText(value: unknown): boolean {
+  return typeof value === 'string';
+}
+
+function isTextOrNull(value: unknown): boolean {
+  return value === null || typeof value === 'string';
+}
+
+/**
+ * The refusal of a read-then-write whose read lacks a field it must re-send,
+ * or carries it with the wrong type (AGENTS.md rule 15). `value` is never
+ * quoted: it is GlitchTip data.
+ */
+export function notPreserved(field: string, param: string, value: unknown, kind: string): string {
+  const what =
+    value === undefined
+      ? `did not include ${field}`
+      : `returned ${field} as something other than ${kind}`;
+  return (
+    `Not updated: GlitchTip's response ${what}, so its current value cannot be preserved; ` +
+    `pass \`${param}\` explicitly or retry.`
+  );
+}
 
 const deleteProjectArgs = z.object({
   organization: organizationParam,
@@ -183,12 +212,9 @@ export class ProjectsMutations {
       platform: args.platform ?? current.platform,
       eventThrottleRate: args.event_throttle_rate ?? current.eventThrottleRate,
     };
-    const missing = UPDATE_PROJECT_FIELDS.find(({ field }) => body[field] === undefined);
-    if (missing) {
-      return error(
-        `Not updated: GlitchTip's response did not include ${missing.field}, so its current ` +
-          `value cannot be preserved; pass \`${missing.param}\` explicitly or retry.`,
-      );
+    const gap = UPDATE_PROJECT_FIELDS.find(({ field, usable }) => !usable(body[field]));
+    if (gap) {
+      return error(notPreserved(gap.field, gap.param, body[gap.field], gap.kind));
     }
     const updated = await glitchtip.client.call(
       {

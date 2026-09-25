@@ -220,6 +220,52 @@ describe('update_project_key', () => {
     expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
   });
 
+  it('refuses, without a PUT, when the GET has a label and a name of the wrong type', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, {
+      ...KEY,
+      name: 7,
+      label: ['Default'],
+    });
+    const { text, isError } = await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      rate_limit: null,
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain("GlitchTip's response returned label as something other than");
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
+  it('uses label when name has the wrong type', async () => {
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, { ...KEY, name: 7 })
+      .json('PUT', `${API}/projects/acme/web/keys/${KEY_ID}/`, KEY);
+    await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      rate_limit: null,
+    });
+    expect(JSON.parse(mock.requests[1].body)).toEqual({ name: 'Default', rateLimit: null });
+  });
+
+  it('refuses, without a PUT, when the GET has a malformed rateLimit and none is given', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/keys/${KEY_ID}/`, {
+      ...KEY,
+      rateLimit: { window: '60' },
+    });
+    const { text, isError } = await call(mock, 'update_project_key', {
+      organization: 'acme',
+      project: 'web',
+      key_id: KEY_ID,
+      label: 'Renamed',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain("GlitchTip's response returned rateLimit as something other than");
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
   it('refuses, without a PUT, when the GET has no rateLimit and none is given', async () => {
     const { rateLimit: _omitted, ...partial } = KEY;
     const mock = new MockGlitchTip().json(
@@ -234,7 +280,8 @@ describe('update_project_key', () => {
       label: 'Renamed',
     });
     expect(isError).toBe(true);
-    expect(text).toContain("GlitchTip's response did not include rate_limit");
+    expect(text).toContain("GlitchTip's response did not include rateLimit");
+    expect(text).toContain('pass `rate_limit` explicitly');
     expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
   });
 

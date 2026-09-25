@@ -520,6 +520,24 @@ describe('add_release_commits', () => {
     });
   }
 
+  it('refuses, without a POST, when a stored commit field has the wrong type', async () => {
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/releases/1.0.0/commits/`,
+      [{ ...EXISTING[0], authorName: 7 }, EXISTING[1]],
+    );
+    const { text, isError } = await call(mock, 'add_release_commits', {
+      organization: 'acme',
+      version: '1.0.0',
+      commits: [{ id: 'a3' }],
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain(
+      "GlitchTip's response returned author_name as something other than text or null for stored commit 1",
+    );
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
   it('accepts a partial stored commit the caller sends again, since it is replaced whole', async () => {
     const { authorEmail: _omitted, ...partial } = EXISTING[0];
     const mock = new MockGlitchTip()

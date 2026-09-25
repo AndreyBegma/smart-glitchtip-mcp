@@ -54,7 +54,7 @@ export function mergeCommits(
       const what =
         commit[unusable.field] === undefined
           ? `did not include ${unusable.param}`
-          : `returned a ${unusable.param} that is not text`;
+          : `returned ${unusable.param} as something other than text or null`;
       return {
         refusal:
           `Not attached: GlitchTip's response ${what} for stored commit ${position}, so it ` +

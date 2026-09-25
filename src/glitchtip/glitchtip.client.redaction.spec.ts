@@ -103,9 +103,51 @@ describe('GlitchTipClient error detail redaction (BUG-20260925-017)', () => {
     expect(leakedStart(error.message, TOKEN)).toBeUndefined();
   });
 
-  it('removes a start of the token that GlitchTip already cut off itself', async () => {
-    const error = await rejectedPost(400, `bad value ${TOKEN.slice(0, 9)}`);
-    expect(error.detail).toBe('bad value [redacted]');
+  it('removes a start of the token that GlitchTip already cut off itself (… or ...)', async () => {
+    const cut = TOKEN.slice(0, 9);
+    expect((await rejectedPost(400, `bad value ${cut}…`)).detail).toBe('bad value [redacted]…');
+    expect((await rejectedPost(400, `bad value ${cut}...`)).detail).toBe('bad value [redacted]...');
+  });
+
+  it('removes a cut-off start inside a validation-error list item, before stringifying', async () => {
+    const detail = [{ loc: ['body', 'url'], msg: `bad ${TOKEN.slice(0, 9)}…`, type: 'x' }];
+    const error = await rejectedPost(422, detail);
+    expect(leakedStart(error.detail, TOKEN)).toBeUndefined();
+    expect(error.detail).toContain('"msg":"bad [redacted]…"');
+  });
+
+  it('removes an extra secret whose JSON-escaped form is what the list detail carries', async () => {
+    const quoted = 'hook"secret\\value_1234';
+    const error = await rejectedPost(422, [{ msg: `bad ${quoted}` }], { extraSecrets: [quoted] });
+    expect(error.detail).toBe('[{"msg":"bad [redacted]"}]');
+  });
+
+  it('removes an extra secret echoed \\uXXXX-escaped in a string detail', async () => {
+    const secret = 'pässwörd_secret_value';
+    const escaped = JSON.stringify(secret)
+      .slice(1, -1)
+      .replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+    const error = await rejectedPost(400, `got ${escaped}`, { extraSecrets: [secret] });
+    expect(error.detail).toBe('got [redacted]');
+  });
+
+  it('keeps an uncut message and a bare URL scheme at the cut (no over-redaction)', async () => {
+    const short = await rejectedPost(400, 'Enter a valid URL: https', { extraSecrets: [WEBHOOK] });
+    expect(short.detail).toBe('Enter a valid URL: https');
+    const atCut = `${'x'.repeat(DETAIL_LIMIT - 24)}Enter a valid URL: https${'y'.repeat(50)}`;
+    const cut = await rejectedPost(400, atCut, { extraSecrets: [WEBHOOK] });
+    expect(cut.detail?.endsWith('Enter a valid URL: https…')).toBe(true);
+  });
+
+  it('removes extra secrets from the response headers of a list call', async () => {
+    const { mock, client } = setup();
+    mock.json('GET', ORGS, [], { headers: { 'x-hook': WEBHOOK } });
+    const page = await client.page(
+      { name: 'list organizations', scopes: [] },
+      (api) => api.GET('/api/0/organizations/'),
+      { extraSecrets: [WEBHOOK] },
+    );
+    expect(page.headers.get('x-hook')).toBe('[redacted]');
   });
 
   it('leaves a detail with no secret in it as it was', async () => {

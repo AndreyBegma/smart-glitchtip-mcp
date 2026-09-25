@@ -152,10 +152,11 @@ always re-sent unchanged, never dropped. At least one of `name`, `platform`,
 `new_slug` or `event_throttle_rate` is required.
 
 If GlitchTip's read leaves out a field the tool must re-send (`name`, `slug`,
-`platform`, `eventThrottleRate`) and the caller did not supply it, the call is
-refused with nothing written: "GlitchTip's response did not include `<field>`
-…; pass `<parameter>` explicitly or retry" (AGENTS.md rule 15). A `null` in the
-read is re-sent as `null`.
+`platform`, `eventThrottleRate`), or carries it with the wrong type, and the
+caller did not supply it, the call is refused with nothing written:
+"GlitchTip's response did not include `<field>` …; pass `<parameter>`
+explicitly or retry" (AGENTS.md rule 15). A `null` in the read is re-sent as
+`null` (except `name`, which must be text).
 
 | Input | Type | Default |
 |---|---|---|
@@ -199,9 +200,10 @@ Change a client key's label or rate limit. Same full-replace rule as
 with the requested change merged in. `rate_limit: null` clears the rate
 limit; omitting it keeps the current one.
 
-The current label is read from `name`, or from `label` (GlitchTip's canonical
-field) when `name` is absent. A read carrying neither, with no `label` given,
-or carrying no `rateLimit`, with no `rate_limit` given, is refused with
+The current label is the first of `name` and `label` (GlitchTip's canonical
+field) that is text, else `null` if either is `null`. A read with neither
+usable, and no `label` given — or with `rateLimit` missing or not
+`{ window, count }`/`null`, and no `rate_limit` given — is refused with
 nothing written.
 
 | Input | Type | Default |

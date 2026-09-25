@@ -124,7 +124,8 @@ export class GlitchTipClient {
   ): Promise<Page<T>> {
     const result = await this.perform(operation, request, options);
     if (!Array.isArray(result.data)) throw malformedListError(operation);
-    const headers = redactedHeaders(result.response.headers, this.instance.redactor());
+    const redactor = this.instance.redactor(options?.extraSecrets);
+    const headers = redactedHeaders(result.response.headers, redactor);
     return { items: result.data, nextCursor: parseNextCursor(headers.get('link')), headers };
   }
 

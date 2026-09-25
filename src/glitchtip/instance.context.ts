@@ -41,14 +41,12 @@ export class ResolvedInstance {
       .digest('hex');
   }
 
-  /** Removes the token from text that may have come back from GlitchTip. */
-  redact(text: string): string {
-    return this.redactor().redact(text);
-  }
-
-  /** A redactor for the token and any secrets a caller holds besides it. */
+  /**
+   * What removes the token — and any secrets a caller holds besides it — from
+   * text that may have come back from GlitchTip.
+   */
   redactor(extraSecrets: readonly string[] = []): Redactor {
-    return new Redactor([this.#token, ...extraSecrets]);
+    return new Redactor(this.#token, extraSecrets);
   }
 
   toJSON(): object {

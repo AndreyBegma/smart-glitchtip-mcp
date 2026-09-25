@@ -5,7 +5,7 @@ tracking_id: "BUG-20260925-017-partial-read-writes-and-truncated-token"
 status: "patched"
 source_bug_report: "docs/specs/BUG-20260925-017-partial-read-writes-and-truncated-token.md"
 created_at: "2026-09-25"
-pr_url: ""
+pr_url: "https://github.com/AndreyBegma/smart-glitchtip-mcp/pull/34"
 ---
 
 # Fix Summary: Partial-read writes and the truncated-token leak
@@ -83,12 +83,12 @@ not silent data loss.
 
 | Path | Change |
 |---|---|
-| `src/glitchtip/redactor.ts` | New. `Redactor` holds a set of secrets in a private field (non-empty, longest first; `toJSON` hides them). `redact(text)` replaces every whole occurrence with `[redacted]`; `redactCutEnd(text)` replaces a trailing start of 4+ characters of any secret. |
-| `src/glitchtip/instance.context.ts` | `redactor(extraSecrets)` returns a `Redactor` of the token plus the extras; `redact()` delegates to it. |
-| `src/glitchtip/glitchtip.errors.ts` | `errorFromResponse` takes a **required** `Redactor`. `detailOf` stringifies → `redact` → cuts at 500 → `redactCutEnd` → `…`. `redactCutEnd` also runs on an uncut detail: a start GlitchTip cut off itself leaks the same way. |
-| `src/glitchtip/glitchtip.client.ts` | `CallOptions.extraSecrets`. `perform` builds the redactor (token + extras) and passes it to `errorFromResponse` and to the post-hoc message redaction; `raw` scrubs body and headers with it. `redacted`/`redactedHeaders` became module functions taking the redactor. |
-| `src/toolsets/projects/projects.mutations.ts` | `update_project` builds the `PUT` body, then refuses when any of `name`/`slug`/`platform`/`eventThrottleRate` is still `undefined`, naming the field and the parameter that supplies it. Description says so. |
-| `src/toolsets/projects/project-keys.mutations.ts` | `update_project_key`: label is `label` arg ?? `current.name` ?? `current.label`; refuses when none is present, or when `rateLimit` is absent and not given. |
+| `src/glitchtip/redactor.ts` | New. `Redactor(token, extraSecrets)` holds the secrets' forms in a private field (`toJSON` hides them). Each secret is matched as written, JSON-escaped, and JSON-escaped with non-ASCII as `\uXXXX` (either hex case). Extra secrets shorter than 8 characters are ignored; the token never is. `redact(text)` replaces every whole occurrence, merging overlapping matches into one `[redacted]`; `redactCutEnd(text)` replaces a trailing start of 4+ characters (6+ for a secret that parses as a URL, so "Enter a valid URL: https" survives). |
+| `src/glitchtip/instance.context.ts` | `redactor(extraSecrets)` returns a `Redactor` of the token plus the extras. The old `redact()` had no callers left and is removed. |
+| `src/glitchtip/glitchtip.errors.ts` | `errorFromResponse` takes a **required** `Redactor`. `detailOf` redacts each string first — a string detail, or every string inside a validation-error list, before it is stringified — and runs `redactCutEnd` on a string GlitchTip cut itself (ends in `…` or `...`). A list is then stringified and redacted again; the cut at 500 comes last and is followed by `redactCutEnd` → `…`. `redactCutEnd` runs only where a cut happened. |
+| `src/glitchtip/glitchtip.client.ts` | `CallOptions.extraSecrets`. `perform` builds the redactor (token + extras) and passes it to `errorFromResponse` and to the post-hoc message redaction; `page` and `raw` scrub headers (and `raw` the body) with it. `redacted`/`redactedHeaders` became module functions taking the redactor. |
+| `src/toolsets/projects/projects.mutations.ts` | `update_project` builds the `PUT` body, then refuses when any of `name` (text), `slug`/`platform` (text or null) or `eventThrottleRate` (number or null) is missing or of the wrong type, naming the field and the parameter that supplies it. `notPreserved()` builds that message for both project tools. Description says so. |
+| `src/toolsets/projects/project-keys.mutations.ts` | `update_project_key`: label is the `label` arg, else the first of `current.name`/`current.label` that is text, else `null` if either is `null`; refuses when neither is usable, or when `rateLimit` is missing or not `{window, count}`/`null` and not given. |
 | `src/toolsets/releases/release-commits.merge.ts` | New, pure. `mergeCommits(stored, inputs)`: refuses on a non-string stored id, or on a stored field that is neither text nor `null` for a commit the caller does not send again; otherwise dedups (first position, last values) and merges. Extracted because `releases.mutations.ts` was at 493 lines. |
 | `src/toolsets/releases/releases.mutations.ts` | `add_release_commits` calls `mergeCommits`; the "Skipped" path is gone. 493 → 455 lines. |
 | `src/glitchtip/glitchtip.client.redaction.spec.ts`, `src/glitchtip/redactor.spec.ts` | New tests (see §10). |
@@ -156,7 +156,7 @@ logic unchanged apart from the refusal.
 
 ## 11. Checks Run
 
-`bun run lint`, `bun run typecheck`, `bun run test` (71 files, 1016 tests
+`bun run lint`, `bun run typecheck`, `bun run test` (71 files, 1032 tests
 passed), `bun run build` — all green.
 
 ## 12. Manual Verification Performed
@@ -169,9 +169,24 @@ this worker. All verification is against the mocked HTTP layer.
 - A GlitchTip version that genuinely omits one of these fields would turn a
   working update into a refusal. The message names the parameter to pass, so
   the agent can proceed; no data is lost either way.
-- `redactCutEnd` runs on every detail: text that happens to end with the
-  first 4+ characters of the token (`tok_`-style prefixes) is shown as
-  `[redacted]`. Cosmetic.
+- `redactCutEnd` runs only where a text was cut (by this server, or by
+  GlitchTip with `…`/`...`). A message GlitchTip cut without any mark, ending
+  in a start of the token, is not caught — accepted in review to avoid
+  redacting ordinary text. Text that is cut right after the first 4+
+  characters of the token is shown as `[redacted]`. Cosmetic.
+
+## Review round (orchestrator verification of #34)
+
+No blockers; all eight points are fixed on the branch, each with a test:
+`page()` headers honour `extraSecrets`; JSON- and `\uXXXX`-escaped forms are
+matched, and list-detail strings are redacted before stringifying; the
+trailing scrub runs only at a cut, with a 6-character floor for URL secrets;
+extra secrets under 8 characters are ignored; overlapping matches merge; a
+wrong-typed field in the read refuses in `update_project` and
+`update_project_key` as it does in `add_release_commits`; the commit refusal
+reads "returned author_name as something other than text or null"; the
+unused `ResolvedInstance.redact()` is removed. Suite after: 71 files, 1032
+tests.
 
 ## 14. Follow-Up Work
 
@@ -179,7 +194,7 @@ this worker. All verification is against the mocked HTTP layer.
 
 ## 15. PR
 
-See the pull request for issue #33.
+https://github.com/AndreyBegma/smart-glitchtip-mcp/pull/34 (closes #33).
 
 ## 16. Verifier Instructions
 

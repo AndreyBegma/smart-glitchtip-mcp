@@ -153,6 +153,30 @@ describe('update_project', () => {
     });
   }
 
+  for (const [field, wrong] of [
+    ['name', null],
+    ['slug', 42],
+    ['platform', { lang: 'go' }],
+    ['eventThrottleRate', '5'],
+  ] as const) {
+    it(`refuses, without a PUT, when the GET returned ${field} with the wrong type`, async () => {
+      const mock = new MockGlitchTip().json('GET', `${API}/projects/acme/web/`, {
+        ...CURRENT_PROJECT,
+        [field]: wrong,
+      });
+      const changed =
+        field === 'eventThrottleRate' ? { platform: 'go' } : { event_throttle_rate: 1 };
+      const { text, isError } = await call(mock, 'update_project', {
+        organization: 'acme',
+        project: 'web',
+        ...changed,
+      });
+      expect(isError).toBe(true);
+      expect(text).toContain(`GlitchTip's response returned ${field} as something other than`);
+      expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+    });
+  }
+
   it('sends a field the GET left out when the caller gives it', async () => {
     const { platform: _omitted, ...partial } = CURRENT_PROJECT;
     const mock = new MockGlitchTip()
