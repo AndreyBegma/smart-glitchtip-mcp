@@ -187,3 +187,43 @@ with changelog and version bump, then a `v*` tag on `main`.
 **Decision.** v1 ships tools only. Phase 3 adds resource templates
 (`glitchtip://issues/{id}`, `glitchtip://events/{id}`) and prompts
 (`triage-issue`, `release-health-report`).
+
+## D-18 — GlitchTip content is untrusted data
+
+**Decision.** Everything that arrives through an event — titles, messages,
+culprits, stack-frame source, breadcrumbs, tags, user reports — was submitted via
+a public DSN by anyone who has it. Tool output marks it as data, and every tool
+description that returns it says so. The server never interprets it as
+instructions and never follows URLs found in it.
+
+**Why.** Prompt injection through error payloads is the obvious attack on an agent
+reading an error tracker. GlitchTip's own MCP server carries the same warning.
+
+## D-19 — Pinned framework line
+
+**Decision.** NestJS **11** (CommonJS), TypeScript **5.9**, `@rekog/mcp-nest`
+2.0.7, `@modelcontextprotocol/{server,core,node,client}` 2.1.0, `hono` 4, zod 4,
+Express 5, vitest + `unplugin-swc` with legacy decorators and decorator metadata.
+All pinned exactly.
+
+**Why.** `@rekog/mcp-nest` ships CommonJS only. Nest 12 is ESM-only and works with
+it only through Node's `require(esm)`. The Nest 11 line was verified end to end
+in a probe; TypeScript 7 was not checked for `emitDecoratorMetadata`.
+
+**Rejected.** Nest 12 ESM — it works on Node 24, but it rests on an interop path
+nobody here has tested beyond a probe.
+
+**Accepted cost.** A later move to Nest 12 is a migration row of its own.
+
+## D-20 — Raw event JSON is redacted for PII (amends D-12)
+
+**Decision.** `get_event_json` returns the event payload minus `user.ip_address`,
+`user.geo`, cookie values and `Authorization`/`Cookie` request headers. D-12's
+"full raw event" otherwise stands.
+
+**Why.** Least PII by default; an agent debugging an error does not need a
+visitor's IP address or session cookie, and a tool result may be logged or
+shared by the client.
+
+**Accepted cost.** Those fields are unreachable through this server; `api_request`
+(phase 2) is the escape hatch if an operator truly needs them.
