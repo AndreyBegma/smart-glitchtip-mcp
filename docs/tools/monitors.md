@@ -79,17 +79,24 @@ missing entirely renders `unavailable`, distinct from a monitor that
 legitimately has none yet (`no checks yet` / `checks (last 0): none
 recorded yet`). An id or a number (`interval`, `confirmationThreshold`,
 `expectedStatus`, a check's `responseTimeMs`) renders plain only when it is
-actually a number, else `?`. A timestamp (`lastChange`, `created`, a check's
-time) renders plain only when it parses as a date-time, else fenced as
-untrusted text — never trusted as a bare timestamp. `monitorType` renders
-plain only when it is one of GlitchTip's known types, else fenced. In
-`list_monitors` and `list_monitor_checks`, where these values sit in a table
-column, the column itself always shows the safe placeholder and the fenced
-raw value is appended to that row's trailer instead — a table cell's
-80-character cut is not fence-aware, so a tag is never left to embed there.
-A response of the wrong shape entirely (a list answering with an object, a
-field whose type breaks a view mid-render) is the foundation's `malformed`
-tool error naming the tool.
+actually a number, else `?`. A check's `isUp` renders as JSON `true`/`false`
+only for the literal booleans, `null` for anything else, and the uptime
+ratio only counts a check as up for `isUp === true` — a truthy non-boolean
+never inflates it. A timestamp (`lastChange`, `created`, a check's time, in
+both `text` and `json`) renders plain only when it has a strict ISO 8601
+shape (`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}…`) **and** parses as a date-time, else
+fenced as untrusted text — `Date.parse` alone accepts far more than ISO
+8601 (a V8-family engine parses some plain English sentences as dates), so
+the shape check runs first and a value that fails it is never trusted as a
+bare timestamp merely because `Date.parse` happened to make sense of it.
+`monitorType` renders plain only when it is one of GlitchTip's known types,
+else fenced. In `list_monitors` and `list_monitor_checks`, where these
+values sit in a table column, the column itself always shows the safe
+placeholder and the fenced raw value is appended to that row's trailer
+instead — a table cell's 80-character cut is not fence-aware, so a tag is
+never left to embed there. A response of the wrong shape entirely (a list
+answering with an object, a field whose type breaks a view mid-render) is
+the foundation's `malformed` tool error naming the tool.
 
 | Tool | GlitchTip endpoint | readOnly | destructive | idempotent | Read-only mode |
 |---|---|---|---|---|---|
@@ -188,10 +195,12 @@ the given interval — this server never contacts the target itself.
 
 The type rules above are checked before any request, along with `url`'s
 shape for the chosen `monitor_type`: `GET`/`POST` need `http://` or
-`https://`; `"TCP Port"` needs `host:port`; `SSL` needs `https://` or a bare
-host (no scheme, no path); every type refuses `javascript:`, `data:` and
-`file:` outright, and an empty or whitespace-only value after trimming.
-`project`, if given, is resolved to its id with
+`https://` followed by a host (a bare scheme with nothing after it is
+refused); `"TCP Port"` needs `host:port`, or `[ipv6]:port` for a literal
+IPv6 address; `SSL` needs `https://` (with a host) or a bare host (no
+scheme, no path); every type refuses `javascript:`, `data:` and `file:`
+outright, and an empty or whitespace-only value after trimming. `project`,
+if given, is resolved to its id with
 `GET /api/0/projects/{org}/{project}/` first; a missing project is a 404
 tool error. GlitchTip additionally refuses private/internal targets unless
 the instance sets `GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS` (see the warning
@@ -207,12 +216,16 @@ dropped, and it is always re-sent with its current value (a `null`
 `expectedBody` read back is sent as `""`).
 
 **A read-then-write never fills a gap it finds.** Before merging, the `GET`
-response is checked field by field: `monitorType` must be one of GlitchTip's
-known types, `interval` and `confirmationThreshold` must be integers,
-`projectID`/`timeout`/`expectedStatus` must each be present as their typed
-value or `null`, and `expectedBody` must be present as a string or `null`.
-The first field that fails refuses the update — `Not updated: GlitchTip's
-monitor response is incomplete (<field>).` — before any merge is computed,
+response is checked field by field: `name` must be a string; `monitorType`
+must be one of GlitchTip's known types; `url` must be a string, `null`, or
+absent (a Heartbeat monitor's is typically `null`) — never some other type,
+which is refused here rather than left to crash the merge or surface later
+as a generic `malformed` error; `interval` and `confirmationThreshold` must
+be integers; `projectID` must be present as a string or `null`; `timeout`
+and `expectedStatus` must each be present as an integer or `null`; and
+`expectedBody` must be present as a string or `null`. The first field that
+fails refuses the update — `Not updated: GlitchTip's monitor response is
+incomplete (<field>).` — before any merge is computed,
 so a short or malformed `GET` response can never silently reset
 `monitorType` to `Ping`, detach the project, or drop `interval` back to its
 default.
@@ -240,8 +253,10 @@ after the `GET` but before the `PUT`. Output is the updated monitor as `PUT`
 returns it (a re-read); the heartbeat line is always masked — use
 `get_monitor` with `include_heartbeat_url: true` for the URL. If the `PUT`
 itself fails, the current monitor's heartbeat endpoint id and url (read
-during the `GET`, before this tool knew the call would fail) are scrubbed
-from the error message and detail before either reaches the agent.
+during the `GET`, before this tool knew the call would fail) are passed as
+`extraSecrets` on that call, so `GlitchTipClient` scrubs them from the error
+message and detail the same way it scrubs the token (BUG-20260925-017),
+before either reaches the agent.
 
 ## `delete_monitor`
 

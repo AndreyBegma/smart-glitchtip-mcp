@@ -147,6 +147,35 @@ describe('create_monitor', () => {
     expect(mock.requests).toHaveLength(0);
   });
 
+  it('refuses a GET url that is only a scheme, with no host, before any request', async () => {
+    const mock = new MockGlitchTip();
+    const { isError } = await call(mock, 'create_monitor', {
+      organization: 'acme',
+      name: 'API',
+      monitor_type: 'GET',
+      url: 'http:///path',
+      expected_status: 200,
+    });
+    expect(isError).toBe(true);
+    expect(mock.requests).toHaveLength(0);
+  });
+
+  it('accepts a bracketed IPv6 host:port for TCP Port', async () => {
+    const mock = new MockGlitchTip().on(
+      'POST',
+      `${API}/organizations/acme/monitors/`,
+      jsonResponse({ ...MONITOR, monitorType: 'TCP Port', url: '[::1]:22' }, 201),
+    );
+    const { isError } = await call(mock, 'create_monitor', {
+      organization: 'acme',
+      name: 'SSH',
+      monitor_type: 'TCP Port',
+      url: '[::1]:22',
+    });
+    expect(isError).toBe(false);
+    expect(JSON.parse(mock.requests[0].body)).toMatchObject({ url: '[::1]:22' });
+  });
+
   it('accepts an SSL url that is a bare host, with no scheme', async () => {
     const mock = new MockGlitchTip().on(
       'POST',
@@ -325,14 +354,19 @@ describe('update_monitor', () => {
   });
 
   for (const [field, broken] of [
+    ['name', { name: undefined }],
+    ['name', { name: 7 }],
     ['monitorType', { monitorType: 'Bogus' }],
     ['monitorType', { monitorType: undefined }],
+    ['url', { url: 12345 }],
     ['interval', { interval: '60' }],
     ['interval', { interval: undefined }],
     ['confirmationThreshold', { confirmationThreshold: undefined }],
     ['projectID', { projectID: 7 }],
     ['timeout', { timeout: 'never' }],
+    ['timeout', { timeout: 20.5 }],
     ['expectedStatus', { expectedStatus: '200' }],
+    ['expectedStatus', { expectedStatus: 200.5 }],
     ['expectedBody', { expectedBody: 7 }],
   ] as const) {
     it(`refuses without a PUT when the GET response's ${field} is incomplete or the wrong type`, async () => {
@@ -353,6 +387,32 @@ describe('update_monitor', () => {
       expect(mock.requests[0].method).toBe('GET');
     });
   }
+
+  it('accepts a Heartbeat monitor whose url is null, without flagging it incomplete', async () => {
+    const heartbeat = { ...MONITOR, monitorType: 'Heartbeat', url: null };
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/organizations/acme/monitors/1/`, heartbeat)
+      .json('PUT', `${API}/organizations/acme/monitors/1/`, heartbeat);
+    const { isError } = await call(mock, 'update_monitor', {
+      organization: 'acme',
+      monitor_id: 1,
+      name: 'renamed',
+    });
+    expect(isError).toBe(false);
+  });
+
+  it('accepts a Heartbeat monitor whose url is entirely absent from the GET response', async () => {
+    const { url: _url, ...heartbeat } = { ...MONITOR, monitorType: 'Heartbeat' };
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/organizations/acme/monitors/1/`, heartbeat)
+      .json('PUT', `${API}/organizations/acme/monitors/1/`, heartbeat);
+    const { isError } = await call(mock, 'update_monitor', {
+      organization: 'acme',
+      monitor_id: 1,
+      name: 'renamed',
+    });
+    expect(isError).toBe(false);
+  });
 
   it('does not reset monitorType to Ping when the GET response omits it', async () => {
     const { monitorType: _monitorType, ...partial } = MONITOR;

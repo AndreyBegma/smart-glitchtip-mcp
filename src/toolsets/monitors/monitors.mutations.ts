@@ -34,9 +34,10 @@ const UNTRUSTED_SENTENCE =
 // (javascript:, data:, file:) or a shape the chosen monitor_type cannot use is refused before any
 // request, not just before GlitchTip's own validation gets a chance to run.
 const DANGEROUS_URL_SCHEME = /^(javascript|data|file):/i;
-const HTTP_URL = /^https?:\/\//i;
-const HTTPS_URL = /^https:\/\//i;
-const HOST_PORT = /^[^\s/:]+:\d{1,5}$/;
+const HTTP_URL = /^https?:\/\/[^\s/]+/i;
+const HTTPS_URL = /^https:\/\/[^\s/]+/i;
+/** `host:port`, or `[ipv6]:port` for a literal IPv6 address. */
+const HOST_PORT = /^(\[[0-9a-f:]+\]|[^\s/:]+):\d{1,5}$/i;
 /** No scheme, no path, no port: just a hostname or IP literal. */
 const BARE_HOST = /^[^\s/:]+$/;
 
@@ -73,7 +74,9 @@ function isKnownMonitorType(value: unknown): value is (typeof MONITOR_TYPES)[num
  * setting (AGENTS.md rule 15).
  */
 function incompleteMonitorField(current: {
+  readonly name: unknown;
   readonly monitorType: unknown;
+  readonly url?: unknown;
   readonly interval: unknown;
   readonly confirmationThreshold: unknown;
   readonly projectID: unknown;
@@ -81,12 +84,19 @@ function incompleteMonitorField(current: {
   readonly expectedStatus: unknown;
   readonly expectedBody?: unknown;
 }): string | undefined {
+  if (typeof current.name !== 'string') return 'name';
   if (!isKnownMonitorType(current.monitorType)) return 'monitorType';
+  // `url` is legitimately absent or null (most often for a Heartbeat monitor); only a value that
+  // is neither of those nor a string — e.g. a number — is a sign of a broken response, caught here
+  // rather than left to crash the merge or a later render into a generic `malformed` error.
+  if (current.url !== undefined && current.url !== null && typeof current.url !== 'string') {
+    return 'url';
+  }
   if (!Number.isInteger(current.interval)) return 'interval';
   if (!Number.isInteger(current.confirmationThreshold)) return 'confirmationThreshold';
   if (current.projectID !== null && typeof current.projectID !== 'string') return 'projectID';
-  if (current.timeout !== null && typeof current.timeout !== 'number') return 'timeout';
-  if (current.expectedStatus !== null && typeof current.expectedStatus !== 'number') {
+  if (current.timeout !== null && !Number.isInteger(current.timeout)) return 'timeout';
+  if (current.expectedStatus !== null && !Number.isInteger(current.expectedStatus)) {
     return 'expectedStatus';
   }
   if (current.expectedBody !== null && typeof current.expectedBody !== 'string')
@@ -334,6 +344,9 @@ export class MonitorsMutations {
     } else {
       project = current.projectID ?? null;
     }
+    // The heartbeat endpoint id/url this tool itself just read must never reach the agent through
+    // a PUT failure's message or detail (spec: heartbeat URL exposure) — GlitchTipClient scrubs
+    // them, the same way it scrubs the token, before any cut to size (BUG-20260925-017).
     const heartbeatSecrets = [current.endpointID, current.heartbeatEndpoint].filter(
       (s): s is string => Boolean(s),
     );
@@ -361,10 +374,10 @@ export class MonitorsMutations {
               project,
             },
           }),
+        { extraSecrets: heartbeatSecrets },
       ),
       org,
       args.monitor_id,
-      heartbeatSecrets,
     );
     return this.output.render(
       args.format,
