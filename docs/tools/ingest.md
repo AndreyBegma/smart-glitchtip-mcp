@@ -29,7 +29,8 @@ resolved instance (D-03, AGENTS.md rule 9). Before it sends anything:
      made to the DSN's own host. When the DSN's host differs from the resolved instance's host,
      the result also carries a line naming both — a diagnostic, not a redirect.
    - neither: the project's sole key, or a validation error listing every key's `id | label` and
-     asking for `key_id`.
+     asking for `key_id` — a key's `label` is set by whoever administers the project, so it is
+     fenced as untrusted (`glitchtip-config`) inside that message.
    - `key_id` and `dsn` together: a validation error, before any request.
    - a key that answers `isActive: false`: `Key <id> is inactive.`, no send. A key response that
      omits the field counts as active.

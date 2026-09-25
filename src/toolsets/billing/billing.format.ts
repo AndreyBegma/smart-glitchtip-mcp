@@ -1,15 +1,22 @@
+import type { z } from 'zod';
 import { keyValues, table } from '../../format/table';
 import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
 import type { components } from '../../glitchtip/generated/schema';
+import type {
+  settingsOutSchema,
+  socialAppSchema,
+  stripeProductExpandedPriceSchema,
+  stripeSubscriptionSchema,
+} from './billing.validate';
 
-type Product = components['schemas']['StripeProductExpandedPriceSchema'];
+type Product = z.infer<typeof stripeProductExpandedPriceSchema>;
 type Price = components['schemas']['StripeNestedPriceSchema'];
-type Subscription = components['schemas']['StripeSubscriptionSchema'];
+type Subscription = z.infer<typeof stripeSubscriptionSchema>;
 type Usage = components['schemas']['SubscriptionUsageSchema'];
 type DailyEntry = components['schemas']['DailyEventCountEntry'];
-type Settings = components['schemas']['SettingsOut'];
-type SocialApp = components['schemas']['SocialAppSchema'];
+type Settings = z.infer<typeof settingsOutSchema>;
+type SocialApp = z.infer<typeof socialAppSchema>;
 type Overage = components['schemas']['OverageStatusSchema'];
 
 // Views project GlitchTip's payloads down to the fields an agent uses (D-12).
@@ -93,12 +100,20 @@ export function subscriptionView(
       if (!subscription) return appendNote(`No active subscription for ${org}.`, note);
       const cycleStart = subscription.subscriptionCycleStart ?? subscription.currentPeriodStart;
       const cycleEnd = subscription.subscriptionCycleEnd ?? subscription.currentPeriodEnd;
+      const status = subscription.status
+        ? untrusted('status', capText(subscription.status), 'external')
+        : 'none';
+      const collectionMethod = untrusted(
+        'collectionMethod',
+        capText(subscription.collectionMethod),
+        'external',
+      );
       const body = keyValues([
         ['plan', untrusted('product.name', capText(subscription.product.name), 'external')],
         ['events quota', subscription.product.events],
         ['price', priceLine(subscription.price)],
-        ['status', subscription.status ?? 'none'],
-        ['collectionMethod', subscription.collectionMethod],
+        ['status', status],
+        ['collectionMethod', collectionMethod],
         ['currentPeriodStart', subscription.currentPeriodStart],
         ['currentPeriodEnd', subscription.currentPeriodEnd],
         ['subscriptionCycleStart', cycleStart],

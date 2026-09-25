@@ -33,7 +33,10 @@ describe('selectKey', () => {
     const result = selectKey([a, b], 'acme', 'web', {}, ORIGIN);
     expect(result).toEqual({
       ok: false,
-      message: 'Several client keys exist for acme/web: a | A; b | B. Pass `key_id`.',
+      message:
+        'Several client keys exist for acme/web: ' +
+        'a | <untrusted source="glitchtip-config" field="key.label">A</untrusted>; ' +
+        'b | <untrusted source="glitchtip-config" field="key.label">B</untrusted>. Pass `key_id`.',
     });
   });
 

@@ -44,14 +44,18 @@ before every Stripe call.
 - `get_instance_settings` skips the gate: it is the gate's own route.
 
 Every GlitchTip response this toolset reads is checked against its expected shape before
-rendering (numbers where numbers are required, known enum values for `status`/`collectionMethod`):
-a response that does not match — `{}` for an overage or usage endpoint, for example — is
-`isError` ("did not expect"), never rendered as `$NaN` or as an empty-looking success. Stripe's
-free-form `stripeID` and price `interval` values are fenced as untrusted text in `text` output
-alongside the product/plan name and description (they are configured by whoever administers the
-Stripe account, not by this server's operator); `status` is checked against GlitchTip's own
-`SubscriptionStatus` enum instead, so an unexpected value fails closed rather than being rendered
-verbatim.
+rendering (numbers where numbers are required): a response that does not match — `{}` for an
+overage or usage endpoint, for example — is `isError` ("did not expect"), never rendered as
+`$NaN` or as an empty-looking success. `get_instance_settings` checks both the instance-wide
+settings and, when asked for, the organization's own login settings this way; a malformed second
+response degrades to the "unavailable" line rather than failing the whole call. Stripe's free-form
+`stripeID`, price `interval`, subscription `status` and `collectionMethod` are fenced as untrusted
+text in `text` output alongside the product/plan name and description, rather than checked against
+an enum: GlitchTip's declared enum for `status`/`collectionMethod` is a snapshot of what Stripe
+offered when the schema was generated, not a contract Stripe keeps, so a legitimate new value is
+shown (fenced) instead of failing the whole subscription as malformed. `created` and `startDate`
+on a subscription are not validated at all — nothing here reads them, so a response that omits
+them still renders.
 
 ## Untrusted text
 

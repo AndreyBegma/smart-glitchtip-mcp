@@ -46,18 +46,6 @@ const dailyEventCountEntrySchema = z.object({
 
 export const dailyEventsCountSchema = z.object({ data: z.array(dailyEventCountEntrySchema) });
 
-const SUBSCRIPTION_STATUSES = [
-  'incomplete',
-  'incomplete_expired',
-  'trialing',
-  'active',
-  'past_due',
-  'canceled',
-  'unpaid',
-  'paused',
-] as const;
-const COLLECTION_METHODS = ['charge_automatically', 'send_invoice'] as const;
-
 const stripeProductSchema = z.object({
   stripeID: z.string().min(1),
   events: z.number(),
@@ -66,16 +54,23 @@ const stripeProductSchema = z.object({
   default_price_id: z.string().nullish(),
 });
 
+// `status` and `collectionMethod` are Stripe-configured, free-form as far as
+// this server is concerned: GlitchTip's declared enum is a snapshot of what
+// Stripe offered when it was taken, not a contract Stripe keeps. Checking
+// against it here would turn a new, legitimate value into `malformed` for
+// the whole subscription; instead they are read as plain strings and fenced
+// as untrusted text in `subscriptionView`, like stripeID and interval.
+// `created`/`startDate` are in the generated schema but nothing here reads
+// them, so they are not validated at all — requiring a shape this server
+// never uses would fail a response for no benefit.
 export const stripeSubscriptionSchema = z.object({
   stripeID: z.string().min(1),
   product: stripeProductSchema,
   price: priceSchema,
-  status: z.enum(SUBSCRIPTION_STATUSES).nullable(),
-  collectionMethod: z.enum(COLLECTION_METHODS),
-  created: z.string(),
+  status: z.string().nullable(),
+  collectionMethod: z.string().min(1),
   currentPeriodStart: z.string(),
   currentPeriodEnd: z.string(),
-  startDate: z.string(),
   subscriptionCycleStart: z.string().nullish(),
   subscriptionCycleEnd: z.string().nullish(),
 });
@@ -95,6 +90,28 @@ export const stripeProductExpandedPriceSchema = z.object({
 });
 
 export const linkSessionSchema = z.object({ url: z.string().min(1) });
+
+export const socialAppSchema = z.object({
+  name: z.string(),
+  provider: z.string(),
+  brand: z.string(),
+});
+
+export const settingsOutSchema = z.object({
+  version: z.string(),
+  glitchtipInstanceName: z.string().nullable(),
+  serverTimeZone: z.string(),
+  environment: z.string().nullable(),
+  billingEnabled: z.boolean(),
+  iPaidForGlitchTip: z.boolean(),
+  enableUserRegistration: z.boolean(),
+  enableSocialAppsUserRegistration: z.boolean(),
+  enableOrganizationCreation: z.boolean(),
+  enabledFeatures: z.array(z.string()),
+  socialApps: z.array(socialAppSchema),
+});
+
+export const loginSettingsOutSchema = z.object({ socialApps: z.array(socialAppSchema) });
 
 /**
  * Parses `value` against `schema`; a mismatch is a `TypeError` (never a

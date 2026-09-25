@@ -1,3 +1,4 @@
+import { untrusted } from '../../format/untrusted';
 import type { components } from '../../glitchtip/generated/schema';
 import type { GlitchTipClient } from '../../glitchtip/glitchtip.client';
 import { parseDsn } from './ingest.dsn';
@@ -125,7 +126,12 @@ export function selectKey(
   } else if (keys.length === 0) {
     return { ok: false, message: `${org}/${project} has no client keys.` };
   } else {
-    const list = keys.map((key) => `${key.id} | ${keyLabel(key)}`).join('; ');
+    // A key's label is set by whoever administers the project (D-18,
+    // "glitchtip-config"), not by this server's operator — fenced so it
+    // cannot be mistaken for an instruction inside this error message.
+    const list = keys
+      .map((key) => `${key.id} | ${untrusted('key.label', keyLabel(key), 'glitchtip-config')}`)
+      .join('; ');
     return {
       ok: false,
       message: `Several client keys exist for ${org}/${project}: ${list}. Pass \`key_id\`.`,
