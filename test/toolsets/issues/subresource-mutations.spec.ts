@@ -68,6 +68,21 @@ describe('add_issue_comment', () => {
       'Issue 999 was not found in acme (it may be in another organization, or deleted).',
     );
   });
+
+  it('degrades to a plain confirmation when GlitchTip answers with no body', async () => {
+    const mock = new MockGlitchTip().on(
+      'POST',
+      `${API}/organizations/acme/issues/123/comments/`,
+      new Response(null, { status: 201 }),
+    );
+    const { text, isError } = await call(mock, 'add_issue_comment', {
+      organization: 'acme',
+      issue_id: 123,
+      text: 'x',
+    });
+    expect(isError).toBe(false);
+    expect(text).toBe('Requested a comment on issue 123; GlitchTip returned no body.');
+  });
 });
 
 describe('update_issue_comment', () => {
@@ -85,6 +100,40 @@ describe('update_issue_comment', () => {
     });
     expect(JSON.parse(mock.requests[0].body)).toEqual({ data: { text: 'edited' } });
     expect(text).toBe('Updated comment 7.');
+  });
+
+  it('maps 404 to the comment, not the issue (blocker: was rewritten to "issue not found")', async () => {
+    const mock = new MockGlitchTip().json(
+      'PUT',
+      `${API}/organizations/acme/issues/123/comments/999/`,
+      {},
+      { status: 404 },
+    );
+    const { text, isError } = await call(mock, 'update_issue_comment', {
+      organization: 'acme',
+      issue_id: 123,
+      comment_id: 999,
+      text: 'edited',
+    });
+    expect(isError).toBe(true);
+    expect(text).toBe('Comment 999 was not found in acme.');
+    expect(text).not.toContain('Issue 123 was not found');
+  });
+
+  it('degrades to a plain confirmation when GlitchTip answers with no body', async () => {
+    const mock = new MockGlitchTip().on(
+      'PUT',
+      `${API}/organizations/acme/issues/123/comments/7/`,
+      new Response(null, { status: 200 }),
+    );
+    const { text, isError } = await call(mock, 'update_issue_comment', {
+      organization: 'acme',
+      issue_id: 123,
+      comment_id: 7,
+      text: 'edited',
+    });
+    expect(isError).toBe(false);
+    expect(text).toBe('Requested an update to comment 7; GlitchTip returned no body.');
   });
 });
 

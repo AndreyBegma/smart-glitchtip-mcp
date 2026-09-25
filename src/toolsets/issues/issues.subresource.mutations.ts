@@ -96,10 +96,10 @@ export class IssueSubresourceMutations {
       org,
       args.issue_id,
     );
-    return this.output.render(
-      args.format,
-      commentView(`Added comment ${comment.id} to issue ${args.issue_id}.`, comment),
-    );
+    const summary = comment
+      ? `Added comment ${comment.id} to issue ${args.issue_id}.`
+      : `Requested a comment on issue ${args.issue_id}; GlitchTip returned no body.`;
+    return this.output.render(args.format, commentView(summary, comment));
   }
 
   @Tool({
@@ -117,37 +117,35 @@ export class IssueSubresourceMutations {
   ): Promise<CallToolResult> {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
-    const comment = await callForIssue(
-      glitchtip.client.call(
-        {
-          name: 'update issue comment',
-          scopes: ISSUE_WRITE_SCOPES,
-          resource: 'Comment',
-          id: args.comment_id,
-          org,
-        },
-        (api) =>
-          api.PUT(
-            '/api/0/organizations/{organization_slug}/issues/{issue_id}/comments/{comment_id}/',
-            {
-              params: {
-                path: {
-                  organization_slug: org,
-                  issue_id: args.issue_id,
-                  comment_id: args.comment_id,
-                },
+    // Not callForIssue: a 404 here almost always means the comment_id is wrong, not the
+    // issue_id, and callForIssue would blindly rewrite it to an "issue not found" message.
+    const comment = await glitchtip.client.call(
+      {
+        name: 'update issue comment',
+        scopes: ISSUE_WRITE_SCOPES,
+        resource: 'Comment',
+        id: args.comment_id,
+        org,
+      },
+      (api) =>
+        api.PUT(
+          '/api/0/organizations/{organization_slug}/issues/{issue_id}/comments/{comment_id}/',
+          {
+            params: {
+              path: {
+                organization_slug: org,
+                issue_id: args.issue_id,
+                comment_id: args.comment_id,
               },
-              body: { data: { text: args.text } },
             },
-          ),
-      ),
-      org,
-      args.issue_id,
+            body: { data: { text: args.text } },
+          },
+        ),
     );
-    return this.output.render(
-      args.format,
-      commentView(`Updated comment ${args.comment_id}.`, comment),
-    );
+    const summary = comment
+      ? `Updated comment ${args.comment_id}.`
+      : `Requested an update to comment ${args.comment_id}; GlitchTip returned no body.`;
+    return this.output.render(args.format, commentView(summary, comment));
   }
 
   @Tool({

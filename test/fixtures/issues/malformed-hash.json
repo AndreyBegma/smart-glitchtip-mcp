@@ -1,0 +1,17 @@
+[
+  {
+    "id": "hash-1",
+    "latestEvent": {
+      "id": "1",
+      "eventID": "evt1",
+      "projectID": 1,
+      "groupID": "1",
+      "dateCreated": "2026-01-01T00:00:00Z",
+      "dateReceived": "2026-01-01T00:00:00Z",
+      "type": "error",
+      "message": "x",
+      "tags": [],
+      "title": null
+    }
+  }
+]

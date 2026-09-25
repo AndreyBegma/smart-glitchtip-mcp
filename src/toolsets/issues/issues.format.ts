@@ -10,13 +10,19 @@ type IssueActor = components['schemas']['IssueActorSchema'];
 type IssueStats = components['schemas']['IssueStatsResponse'];
 type IssueTag = components['schemas']['IssueTagSchema'];
 type Commit = components['schemas']['CommitSchema'];
+type IssueRelease = components['schemas']['IssueReleaseSchema'];
 
 // Views project GlitchTip's payloads down to the fields an agent uses (D-12).
-// Text fields event submitters control (title, culprit, tag values) are
-// wrapped with untrusted() in text output only (D-18); json keeps raw values,
-// the same projection contract organizations.format.ts uses.
+// Text fields event submitters control (title, culprit, tag keys/values,
+// release versions, commit author/message) are wrapped with untrusted() in
+// text output only (D-18); json keeps raw values, the same projection
+// contract organizations.format.ts uses. Every field read here is guarded
+// against a malformed/partial GlitchTip response (optional chaining, `?? ''`)
+// so a bad payload degrades the text, never throws.
 
 const TITLE_LIST_LIMIT = 120;
+/** Caps a single untrusted field so a shared response-budget cut can't land mid-fence. */
+const FIELD_CAP = 2000;
 
 export function issueListView(
   page: Page<Issue>,
@@ -29,7 +35,9 @@ export function issueListView(
     text: () => {
       if (issues.length === 0) {
         const where = project ? `${org}/${project}` : org;
-        return `No issues match \`${query}\` in ${where}.`;
+        return query === ''
+          ? `No issues in ${where} (all statuses).`
+          : `No issues match \`${query}\` in ${where}.`;
       }
       const body = table(issues, [
         { header: 'shortId', value: (i) => i.shortId },
@@ -39,12 +47,13 @@ export function issueListView(
         { header: 'count', value: (i) => i.count },
         { header: 'users', value: (i) => i.userCount ?? 0 },
         { header: 'lastSeen', value: (i) => withRelative(i.lastSeen) },
-        { header: 'project', value: (i) => i.project.slug ?? i.project.name },
+        { header: 'project', value: (i) => i.project?.slug ?? i.project?.name ?? '-' },
         { header: 'assignee', value: (i) => actorLabel(i.assignedTo) },
       ]);
       const [header, ...rows] = body.split('\n');
       const withTitles = rows.map(
-        (line, i) => `${line}  ${untrusted('title', truncate(issues[i].title, TITLE_LIST_LIMIT))}`,
+        (line, i) =>
+          `${line}  ${untrusted('title', truncate(issues[i].title ?? '', TITLE_LIST_LIMIT))}`,
       );
       return withCursor([header, ...withTitles].join('\n'), page.nextCursor);
     },
@@ -57,7 +66,7 @@ export function issueListView(
         count: i.count,
         userCount: i.userCount,
         lastSeen: i.lastSeen,
-        project: i.project.slug ?? i.project.name,
+        project: i.project?.slug ?? i.project?.name ?? null,
         assignedTo: actorProjection(i.assignedTo),
         title: i.title,
       })),
@@ -78,17 +87,20 @@ export function issueDetailView(issue: IssueDetail): View {
         ['users', issue.userCount ?? 0],
         ['lastSeen', withRelative(issue.lastSeen)],
         ['firstSeen', withRelative(issue.firstSeen)],
-        ['project', issue.project.slug ?? issue.project.name],
+        ['project', issue.project?.slug ?? issue.project?.name ?? '-'],
         ['assignee', actorLabel(issue.assignedTo)],
         ['type', issue.type],
-        ['firstRelease', issue.firstRelease?.version],
-        ['lastRelease', issue.lastRelease?.version],
+        ['firstRelease', releaseVersionText('firstRelease', issue.firstRelease)],
+        ['lastRelease', releaseVersionText('lastRelease', issue.lastRelease)],
         ['userReportCount', issue.userReportCount],
         ['numComments', issue.numComments],
-        ['statusDetails', issue.statusDetails ? JSON.stringify(issue.statusDetails) : undefined],
+        ['statusDetails', statusDetailsText(issue.statusDetails)],
         ['permalink', permalinkOf(issue)],
-        ['title', untrusted('title', issue.title)],
-        ['culprit', issue.culprit ? untrusted('culprit', issue.culprit) : undefined],
+        ['title', untrusted('title', capText(flatten(issue.title ?? '')))],
+        [
+          'culprit',
+          issue.culprit ? untrusted('culprit', capText(flatten(issue.culprit))) : undefined,
+        ],
       ]);
       return `${body}\nUse get_latest_event (events toolset) for the stack trace.`;
     },
@@ -101,7 +113,7 @@ export function issueDetailView(issue: IssueDetail): View {
       userCount: issue.userCount,
       lastSeen: issue.lastSeen,
       firstSeen: issue.firstSeen,
-      project: issue.project.slug ?? issue.project.name,
+      project: issue.project?.slug ?? issue.project?.name ?? null,
       assignedTo: actorProjection(issue.assignedTo),
       type: issue.type,
       firstRelease: issue.firstRelease?.version ?? null,
@@ -132,8 +144,8 @@ export function issuesStatsView(rows: IssueStats[], period: '24h' | '14d'): View
         { header: 'id', value: (r) => r.id },
         { header: 'count', value: (r) => r.count },
         { header: 'users', value: (r) => r.userCount },
-        { header: 'total', value: (r) => sumBuckets(r.stats[period]) },
-        { header: 'series', value: (r) => seriesText(r.stats[period]) },
+        { header: 'total', value: (r) => sumBuckets(r.stats?.[period]) },
+        { header: 'series', value: (r) => seriesText(r.stats?.[period]) },
       ]);
     },
     json: () => ({
@@ -143,7 +155,7 @@ export function issuesStatsView(rows: IssueStats[], period: '24h' | '14d'): View
         count: r.count,
         userCount: r.userCount,
         isUnhandled: r.isUnhandled,
-        buckets: r.stats[period] ?? [],
+        buckets: r.stats?.[period] ?? [],
       })),
     }),
   };
@@ -157,11 +169,12 @@ export function issueTagsView(issueId: number, key: string | undefined, tags: Is
       }
       return tags
         .map((tag) => {
-          const top = tag.topValues
+          const top = (tag.topValues ?? [])
             .slice(0, 5)
-            .map((v) => `  ${untrusted('tag.value', flatten(v.value))} (${v.count})`)
+            .map((v) => `  ${untrusted('tag.value', flatten(v.value ?? ''))} (${v.count})`)
             .join('\n');
-          return `${tag.key} (${tag.uniqueValues} unique, ${tag.totalValues} total)\n${top}`;
+          const fencedKey = untrusted('tag.key', flatten(tag.key ?? ''));
+          return `${fencedKey} (${tag.uniqueValues} unique, ${tag.totalValues} total)\n${top}`;
         })
         .join('\n\n');
     },
@@ -172,21 +185,27 @@ export function issueTagsView(issueId: number, key: string | undefined, tags: Is
         name: tag.name,
         uniqueValues: tag.uniqueValues,
         totalValues: tag.totalValues,
-        topValues: tag.topValues.slice(0, 5).map((v) => ({ value: v.value, count: v.count })),
+        topValues: (tag.topValues ?? [])
+          .slice(0, 5)
+          .map((v) => ({ value: v.value, count: v.count })),
       })),
     }),
   };
 }
 
+/** Not a table (D-18): untrusted author/message would exceed table()'s per-cell cap mid-fence. */
 export function issueCommitsView(issueId: number, commits: Commit[]): View {
   return {
     text: () => {
       if (commits.length === 0) return `No commits found for issue ${issueId}.`;
-      return table(commits, [
-        { header: 'id', value: (c) => c.id.slice(0, 7) },
-        { header: 'author', value: (c) => c.authorName ?? c.authorEmail ?? '-' },
-        { header: 'message', value: (c) => firstLine(c.message ?? '') },
-      ]);
+      return commits
+        .map((c) => {
+          const id = (c.id ?? '').slice(0, 7) || '-';
+          const author = untrusted('commit.author', flatten(c.authorName ?? c.authorEmail ?? '-'));
+          const message = untrusted('commit.message', flatten(firstLine(c.message ?? '')));
+          return `${id}  ${author}\n${message}`;
+        })
+        .join('\n\n');
     },
     json: () => ({
       issueId,
@@ -212,9 +231,13 @@ export function flatten(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+/** Bounds a single field's length, independent of the whole-response budget (nit 10/11). */
+export function capText(text: string, limit = FIELD_CAP): string {
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
 function truncate(text: string, limit: number): string {
-  const flat = flatten(text);
-  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
+  return capText(flatten(text), limit);
 }
 
 /** Relative age of an ISO timestamp, coarsest unit only (e.g. "2h ago"). */
@@ -253,12 +276,31 @@ function permalinkOf(issue: IssueDetail): string | undefined {
   return issue.permalink && issue.permalink !== 'Not implemented' ? issue.permalink : undefined;
 }
 
+function releaseVersionText(
+  field: string,
+  release: IssueRelease | null | undefined,
+): string | undefined {
+  return release?.version ? untrusted(field, capText(flatten(release.version))) : undefined;
+}
+
+function statusDetailsText(details: Record<string, string> | null | undefined): string | undefined {
+  if (!details) return undefined;
+  const parts: string[] = [];
+  if (details.inRelease) {
+    parts.push(
+      `inRelease: ${untrusted('statusDetails.inRelease', capText(flatten(details.inRelease)))}`,
+    );
+  }
+  if (details.inNextRelease !== undefined) parts.push(`inNextRelease: ${details.inNextRelease}`);
+  return parts.length > 0 ? parts.join(', ') : undefined;
+}
+
 function sumBuckets(buckets: number[][] | null | undefined): number {
-  return (buckets ?? []).reduce((sum, [, n]) => sum + (n ?? 0), 0);
+  return (buckets ?? []).reduce((sum, bucket) => sum + (bucket?.[1] ?? 0), 0);
 }
 
 function seriesText(buckets: number[][] | null | undefined): string {
-  const counts = (buckets ?? []).map(([, n]) => n ?? 0);
+  const counts = (buckets ?? []).map((bucket) => bucket?.[1] ?? 0);
   return counts.length === 0 ? '-' : counts.join(',');
 }
 

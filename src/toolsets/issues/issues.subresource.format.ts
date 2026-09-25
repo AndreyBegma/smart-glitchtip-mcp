@@ -3,7 +3,7 @@ import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
 import type { components } from '../../glitchtip/generated/schema';
 import type { Page } from '../../glitchtip/pagination';
-import { flatten } from './issues.format';
+import { capText, flatten } from './issues.format';
 
 type Comment = components['schemas']['CommentSchema'];
 type UserReport = components['schemas']['UserReportSchema'];
@@ -15,7 +15,7 @@ export function issueCommentsView(issueId: number, page: Page<Comment>): View {
       if (page.items.length === 0) return `No comments on issue ${issueId}.`;
       const blocks = page.items.map((c) => {
         const email = c.user?.email ?? 'unknown';
-        const text = untrusted('comment.text', commentText(c));
+        const text = untrusted('comment.text', capText(commentText(c)));
         return `[${c.id ?? '-'}] ${email} — ${c.dateCreated}\n${text}`;
       });
       return withCursor(blocks.join('\n\n'), page.nextCursor);
@@ -34,10 +34,14 @@ export function issueCommentsView(issueId: number, page: Page<Comment>): View {
 }
 
 /** Confirmation of adding or editing a comment: text() summary, json() the id and date. */
-export function commentView(summary: string, comment: Comment): View {
+export function commentView(summary: string, comment: Comment | undefined): View {
   return {
     text: () => summary,
-    json: () => ({ result: summary, id: comment.id ?? null, dateCreated: comment.dateCreated }),
+    json: () => ({
+      result: summary,
+      id: comment?.id ?? null,
+      dateCreated: comment?.dateCreated ?? null,
+    }),
   };
 }
 
@@ -46,8 +50,10 @@ export function userReportsView(issueId: number, page: Page<UserReport>): View {
     text: () => {
       if (page.items.length === 0) return `No user reports on issue ${issueId}.`;
       const blocks = page.items.map((r) => {
-        const comments = untrusted('user-report.comments', flatten(r.comments));
-        return `${r.dateCreated} — ${r.name} <${r.email}> (event ${r.eventID})\n${comments}`;
+        const name = untrusted('user-report.name', flatten(r.name ?? ''));
+        const email = untrusted('user-report.email', flatten(r.email ?? ''));
+        const comments = untrusted('user-report.comments', flatten(r.comments ?? ''));
+        return `${r.dateCreated} — ${name} <${email}> (event ${r.eventID})\n${comments}`;
       });
       return withCursor(blocks.join('\n\n'), page.nextCursor);
     },
@@ -72,7 +78,7 @@ export function issueHashesView(issueId: number, page: Page<IssueHash>): View {
       if (page.items.length === 0) return `No hashes on issue ${issueId}.`;
       const blocks = page.items.map((h) => {
         if (!h.latestEvent) return `${h.id}: no events`;
-        const title = untrusted('event.title', flatten(h.latestEvent.title));
+        const title = untrusted('event.title', flatten(h.latestEvent.title ?? ''));
         return `${h.id}  event ${h.latestEvent.eventID}  ${h.latestEvent.dateCreated}\n${title}`;
       });
       return withCursor(blocks.join('\n\n'), page.nextCursor);
@@ -95,5 +101,5 @@ export function issueHashesView(issueId: number, page: Page<IssueHash>): View {
 }
 
 function commentText(comment: Comment): string {
-  return comment.data.text ?? '';
+  return comment.data?.text ?? '';
 }

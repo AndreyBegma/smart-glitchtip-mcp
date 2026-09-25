@@ -3,7 +3,8 @@ import { type Booted, bootInMemory, GLITCHTIP, resultText } from '../../support/
 import { MockGlitchTip } from '../../support/mock-glitchtip';
 
 // Acceptance 3, 5, 6: update_issue_status, assign_issue, bulk_update_issues, merge_issues,
-// delete_issue, bulk_delete_issues — method/path/body assertions, confirm guards, and error paths.
+// delete_issue, bulk_delete_issues — method/path/body assertions, confirm guards, error paths,
+// duplicate-id rejection, and honest "requested" wording for bulk/merge operations.
 
 const API = `${GLITCHTIP}/api/0`;
 const TOKEN = 'tok_TEST';
@@ -82,6 +83,19 @@ describe('update_issue_status', () => {
     expect(mock.requests).toHaveLength(0);
   });
 
+  it('refuses an empty in_release before any request', async () => {
+    const mock = new MockGlitchTip();
+    const { text, isError } = await call(mock, 'update_issue_status', {
+      organization: 'acme',
+      issue_id: 123,
+      status: 'resolved',
+      in_release: '',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('Invalid parameters');
+    expect(mock.requests).toHaveLength(0);
+  });
+
   it('maps 404 to the enhanced issue message', async () => {
     const mock = new MockGlitchTip().json(
       'PUT',
@@ -97,6 +111,21 @@ describe('update_issue_status', () => {
     expect(text).toBe(
       'Issue 999 was not found in acme (it may be in another organization, or deleted).',
     );
+  });
+
+  it('degrades to a plain confirmation when GlitchTip answers with no body', async () => {
+    const mock = new MockGlitchTip().on(
+      'PUT',
+      `${API}/organizations/acme/issues/123/`,
+      new Response(null, { status: 204 }),
+    );
+    const { text, isError } = await call(mock, 'update_issue_status', {
+      organization: 'acme',
+      issue_id: 123,
+      status: 'ignored',
+    });
+    expect(isError).toBe(false);
+    expect(text).toBe('Requested status "ignored" for issue 123; GlitchTip returned no body.');
   });
 });
 
@@ -129,6 +158,21 @@ describe('assign_issue', () => {
     expect(JSON.parse(mock.requests[0].body)).toEqual({ assignedTo: null });
     expect(text).toBe('Issue 123: assignee is now unassigned.');
   });
+
+  it('degrades to a plain confirmation when GlitchTip answers with no body', async () => {
+    const mock = new MockGlitchTip().on(
+      'PUT',
+      `${API}/organizations/acme/issues/123/`,
+      new Response(null, { status: 204 }),
+    );
+    const { text, isError } = await call(mock, 'assign_issue', {
+      organization: 'acme',
+      issue_id: 123,
+      assignee: 'user:1',
+    });
+    expect(isError).toBe(false);
+    expect(text).toBe('Requested assignee update for issue 123; GlitchTip returned no body.');
+  });
 });
 
 describe('bulk_update_issues', () => {
@@ -141,7 +185,7 @@ describe('bulk_update_issues', () => {
     });
     expect(mock.requests[0].url.searchParams.getAll('id')).toEqual(['1', '2', '3']);
     expect(JSON.parse(mock.requests[0].body)).toEqual({ status: 'resolved' });
-    expect(text).toBe('Updated 3 issues: 1, 2, 3.');
+    expect(text).toBe('Requested update for 3 issues: 1, 2, 3.');
   });
 
   it('refuses when neither status nor assignee is given, without a request', async () => {
@@ -165,11 +209,29 @@ describe('bulk_update_issues', () => {
     expect(isError).toBe(true);
     expect(mock.requests).toHaveLength(0);
   });
+
+  it('refuses duplicate issue_ids before any request', async () => {
+    const mock = new MockGlitchTip();
+    const { text, isError } = await call(mock, 'bulk_update_issues', {
+      organization: 'acme',
+      issue_ids: [1, 2, 1],
+      status: 'resolved',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('Invalid parameters');
+    expect(mock.requests).toHaveLength(0);
+  });
 });
 
 describe('merge_issues', () => {
-  it('merges into the highest id when confirm matches', async () => {
-    const mock = new MockGlitchTip().json('PUT', `${API}/organizations/acme/issues/`, {});
+  it('merges into the highest id, re-reads it, and reports the confirmed id/shortId', async () => {
+    const mock = new MockGlitchTip()
+      .json('PUT', `${API}/organizations/acme/issues/`, {})
+      .json('GET', `${API}/organizations/acme/issues/9/`, {
+        ...ISSUE_DETAIL,
+        id: '9',
+        shortId: 'PROJ-9',
+      });
     const { text, isError } = await call(mock, 'merge_issues', {
       organization: 'acme',
       issue_ids: [5, 9, 3],
@@ -178,7 +240,21 @@ describe('merge_issues', () => {
     expect(isError).toBe(false);
     expect(mock.requests[0].url.searchParams.getAll('id')).toEqual(['5', '9', '3']);
     expect(JSON.parse(mock.requests[0].body)).toEqual({ merge: 1 });
-    expect(text).toBe('Merged 5, 3 into 9.');
+    expect(mock.requests[1].url.pathname).toBe('/api/0/organizations/acme/issues/9/');
+    expect(text).toBe('Merged 5, 3 into 9 (PROJ-9).');
+  });
+
+  it('falls back to the requested target id when the re-read cannot confirm it', async () => {
+    const mock = new MockGlitchTip()
+      .json('PUT', `${API}/organizations/acme/issues/`, {})
+      .json('GET', `${API}/organizations/acme/issues/9/`, {}, { status: 404 });
+    const { text, isError } = await call(mock, 'merge_issues', {
+      organization: 'acme',
+      issue_ids: [5, 9, 3],
+      confirm: '9',
+    });
+    expect(isError).toBe(false);
+    expect(text).toBe('Requested merge of 5, 3 into 9; could not confirm the result.');
   });
 
   it('refuses a confirm that does not equal the target id, without a request', async () => {
@@ -190,6 +266,18 @@ describe('merge_issues', () => {
     });
     expect(isError).toBe(true);
     expect(text).toContain('confirm must equal the target issue id 9');
+    expect(mock.requests).toHaveLength(0);
+  });
+
+  it('refuses duplicate issue_ids before any request', async () => {
+    const mock = new MockGlitchTip();
+    const { text, isError } = await call(mock, 'merge_issues', {
+      organization: 'acme',
+      issue_ids: [5, 9, 5],
+      confirm: '9',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('Invalid parameters');
     expect(mock.requests).toHaveLength(0);
   });
 });
@@ -250,7 +338,7 @@ describe('bulk_delete_issues', () => {
     });
     expect(isError).toBe(false);
     expect(mock.requests[0].url.searchParams.getAll('id')).toEqual(['1', '2']);
-    expect(text).toBe('Deleted 2 issues: 1, 2.');
+    expect(text).toBe('Requested deletion of 2 issues: 1, 2.');
   });
 
   it('refuses when confirm does not equal the count, without a request', async () => {
@@ -262,6 +350,18 @@ describe('bulk_delete_issues', () => {
     });
     expect(isError).toBe(true);
     expect(text).toContain('confirm must equal the number of issue_ids ("2")');
+    expect(mock.requests).toHaveLength(0);
+  });
+
+  it('refuses duplicate issue_ids before any request', async () => {
+    const mock = new MockGlitchTip();
+    const { text, isError } = await call(mock, 'bulk_delete_issues', {
+      organization: 'acme',
+      issue_ids: [1, 1],
+      confirm: '2',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('Invalid parameters');
     expect(mock.requests).toHaveLength(0);
   });
 });

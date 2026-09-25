@@ -98,6 +98,35 @@ describe('list_issues', () => {
     expect(text).toBe('No issues match `is:unresolved` in acme.');
   });
 
+  it('says so for an empty query without the odd empty-backtick phrasing', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/issues/`, []);
+    const { text, isError } = await call(mock, 'list_issues', { organization: 'acme', query: '' });
+    expect(isError).toBe(false);
+    expect(text).toBe('No issues in acme (all statuses).');
+  });
+
+  it('refuses a non-ISO-8601 start before any request', async () => {
+    const mock = new MockGlitchTip();
+    const { text, isError } = await call(mock, 'list_issues', {
+      organization: 'acme',
+      start: 'not-a-date',
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain('Invalid parameters');
+    expect(mock.requests).toHaveLength(0);
+  });
+
+  it('accepts an ISO-8601 start/end and passes them through', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/issues/`, []);
+    await call(mock, 'list_issues', {
+      organization: 'acme',
+      start: '2026-01-01T00:00:00Z',
+      end: '2026-02-01T00:00:00Z',
+    });
+    expect(mock.requests[0].url.searchParams.get('start')).toBe('2026-01-01T00:00:00Z');
+    expect(mock.requests[0].url.searchParams.get('end')).toBe('2026-02-01T00:00:00Z');
+  });
+
   it('turns a 401 into an actionable tool error', async () => {
     const mock = new MockGlitchTip().json(
       'GET',
@@ -140,6 +169,48 @@ describe('get_issue', () => {
     expect(text).toContain('<untrusted source="glitchtip-event" field="title">');
     expect(text).toContain('<untrusted source="glitchtip-event" field="culprit">');
     expect(text).toContain('Use get_latest_event (events toolset) for the stack trace.');
+  });
+
+  it('fences release versions and the release inside statusDetails', async () => {
+    const detail = {
+      ...ISSUE,
+      userReportCount: 0,
+      firstRelease: {
+        version: '1.0.0',
+        shortVersion: '1.0.0',
+        dateCreated: '2026-01-01T00:00:00Z',
+        dateReleased: null,
+      },
+      lastRelease: {
+        version: '1.1.0',
+        shortVersion: '1.1.0',
+        dateCreated: '2026-01-01T00:00:00Z',
+        dateReleased: null,
+      },
+      statusDetails: { inRelease: '1.1.0' },
+    };
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/issues/123/`, detail);
+    const { text } = await call(mock, 'get_issue', { organization: 'acme', issue_id: 123 });
+    expect(text).toContain(
+      '<untrusted source="glitchtip-event" field="firstRelease">1.0.0</untrusted>',
+    );
+    expect(text).toContain(
+      '<untrusted source="glitchtip-event" field="lastRelease">1.1.0</untrusted>',
+    );
+    expect(text).toContain(
+      '<untrusted source="glitchtip-event" field="statusDetails.inRelease">1.1.0</untrusted>',
+    );
+  });
+
+  it('caps an oversized title instead of returning it unbounded', async () => {
+    const detail = { ...ISSUE, userReportCount: 0, title: 'x'.repeat(3000) };
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/issues/123/`, detail);
+    const { text } = await call(mock, 'get_issue', { organization: 'acme', issue_id: 123 });
+    const fenced = /<untrusted source="glitchtip-event" field="title">(.*?)<\/untrusted>/.exec(
+      text,
+    );
+    expect(fenced?.[1]?.length).toBeLessThanOrEqual(2000);
+    expect(text).toContain('…');
   });
 
   it('maps 404 to the enhanced issue message', async () => {
@@ -234,7 +305,9 @@ describe('list_issue_tags', () => {
       key: 'browser',
     });
     expect(mock.requests[0].url.searchParams.get('key')).toBe('browser');
-    expect(text).toContain('browser (2 unique, 10 total)');
+    expect(text).toContain(
+      '<untrusted source="glitchtip-event" field="tag.key">browser</untrusted> (2 unique, 10 total)',
+    );
     expect(text).toContain(
       '<untrusted source="glitchtip-event" field="tag.value">Chrome</untrusted> (7)',
     );
@@ -248,7 +321,7 @@ describe('list_issue_tags', () => {
 });
 
 describe('list_issue_commits', () => {
-  it('shows a short id, author and first message line', async () => {
+  it('shows a short id, and fences author and first message line as untrusted', async () => {
     const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/issues/123/commits/`, [
       { id: 'abcdef0123456789', message: 'Fix the bug\n\nLonger body.', authorName: 'Dev' },
     ]);
@@ -257,8 +330,12 @@ describe('list_issue_commits', () => {
       issue_id: 123,
     });
     expect(text).toContain('abcdef0');
-    expect(text).toContain('Dev');
-    expect(text).toContain('Fix the bug');
+    expect(text).toContain(
+      '<untrusted source="glitchtip-event" field="commit.author">Dev</untrusted>',
+    );
+    expect(text).toContain(
+      '<untrusted source="glitchtip-event" field="commit.message">Fix the bug</untrusted>',
+    );
     expect(text).not.toContain('Longer body.');
   });
 
