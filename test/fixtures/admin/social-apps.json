@@ -1,0 +1,13 @@
+[
+  {
+    "serverUrl": "https://idp.example.test/realms/corp",
+    "brand": "keycloak",
+    "callbackUrl": "https://glitchtip.test/auth/oidc/corp/login/callback/",
+    "loginUrl": "https://glitchtip.test/auth/oidc/corp/login/",
+    "id": 3,
+    "name": "Corp SSO",
+    "provider": "openid_connect",
+    "providerID": "corp",
+    "clientID": "glitchtip-client-123"
+  }
+]

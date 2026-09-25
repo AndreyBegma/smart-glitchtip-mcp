@@ -1,0 +1,5 @@
+[
+  { "email": "partial@example.test" },
+  "not-an-object",
+  { "isPrimary": "yes", "isVerified": null, "email": 7 }
+]
