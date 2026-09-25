@@ -1,4 +1,5 @@
 import { AgentFacingError } from '../agent-facing.error';
+import type { Redactor } from './redactor';
 
 export type GlitchTipErrorKind =
   | 'invalid'
@@ -48,14 +49,18 @@ export class GlitchTipError extends AgentFacingError {
   }
 }
 
-/** Maps a non-2xx response that retries did not fix. */
+/**
+ * Maps a non-2xx response that retries did not fix. `redactor` is applied to
+ * GlitchTip's detail before it is cut to size, so no secret is left half-cut.
+ */
 export function errorFromResponse(
   status: number,
   body: unknown,
   operation: Operation,
+  redactor: Redactor,
   retryAfterSeconds?: number,
 ): GlitchTipError {
-  const detail = detailOf(body);
+  const detail = detailOf(body, redactor);
   if (status === 400 || status === 422) {
     return new GlitchTipError(
       'invalid',
@@ -142,11 +147,44 @@ function notFoundMessage({ name, resource, id, org }: Operation): string {
   return org ? `${what} was not found in ${org}.` : `${what} was not found.`;
 }
 
-/** GlitchTip's `detail` (a string, or django-ninja's list of validation errors), bounded. */
-function detailOf(body: unknown): string | undefined {
+/** How GlitchTip (or a library under it) marks a message it cut itself. */
+const GLITCHTIP_ELLIPSES = ['…', '...'];
+
+/**
+ * GlitchTip's `detail` (a string, or django-ninja's list of validation
+ * errors), redacted and bounded (BUG-20260925-017). Each string is redacted
+ * before anything is joined or cut; a list is then stringified and redacted
+ * again (for escaped forms); the cut comes last, and a secret's start left at
+ * the cut is removed.
+ */
+function detailOf(body: unknown, redactor: Redactor): string | undefined {
   if (body === undefined || body === null || body === '') return undefined;
   const raw =
     typeof body === 'object' && 'detail' in body ? (body as { detail: unknown }).detail : body;
-  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
-  return text.length > DETAIL_LIMIT ? `${text.slice(0, DETAIL_LIMIT)}…` : text;
+  const text =
+    typeof raw === 'string'
+      ? redactedMessage(raw, redactor)
+      : redactor.redact(JSON.stringify(redactedStrings(raw, redactor)));
+  if (text.length <= DETAIL_LIMIT) return text;
+  return `${redactor.redactCutEnd(text.slice(0, DETAIL_LIMIT))}…`;
+}
+
+/** Every string inside a JSON value, redacted as a message. */
+function redactedStrings(value: unknown, redactor: Redactor): unknown {
+  if (typeof value === 'string') return redactedMessage(value, redactor);
+  if (Array.isArray(value)) return value.map((item) => redactedStrings(item, redactor));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactedStrings(item, redactor)]),
+    );
+  }
+  return value;
+}
+
+/** One message: secrets removed whole, and a start of one where GlitchTip cut it (`…`). */
+function redactedMessage(text: string, redactor: Redactor): string {
+  const redacted = redactor.redact(text);
+  const ellipsis = GLITCHTIP_ELLIPSES.find((mark) => redacted.endsWith(mark));
+  if (!ellipsis) return redacted;
+  return `${redactor.redactCutEnd(redacted.slice(0, -ellipsis.length))}${ellipsis}`;
 }

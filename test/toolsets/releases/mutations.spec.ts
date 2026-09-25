@@ -475,32 +475,98 @@ describe('add_release_commits', () => {
     ]);
   });
 
-  it('skips a stored commit whose id is not a string, and says so, instead of re-sending it', async () => {
+  // BUG-20260925-017: the POST replaces the stored list, so a commit left out of it is deleted.
+  it('refuses, without a POST, when a stored commit id is not a string (never drops it)', async () => {
     const malformed = [
       { id: 12345, message: 'numeric id', authorName: 'Dev', authorEmail: 'dev@example.test' },
       { id: 'a1', message: 'ok', authorName: 'Dev', authorEmail: 'dev@example.test' },
     ];
-    const mock = new MockGlitchTip()
-      .json('GET', `${API}/organizations/acme/releases/1.0.0/commits/`, malformed)
-      .json('POST', `${API}/organizations/acme/releases/1.0.0/commits/`, {
-        ...RELEASE,
-        commitCount: 2,
-      });
-    const { text } = await call(mock, 'add_release_commits', {
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/releases/1.0.0/commits/`,
+      malformed,
+    );
+    const { text, isError } = await call(mock, 'add_release_commits', {
       organization: 'acme',
       version: '1.0.0',
       commits: [{ id: 'a2', message: 'new one' }],
     });
-    const body = JSON.parse(mock.requests[1].body);
-    expect(body).toEqual([
-      { id: 'a1', message: 'ok', authorName: 'Dev', authorEmail: 'dev@example.test' },
-      { id: 'a2', message: 'new one', authorName: '', authorEmail: '' },
-    ]);
-    expect(text).toContain('Skipped 1 previously stored commit(s) with a non-string id.');
+    expect(isError).toBe(true);
+    expect(text).toContain('stored commit 1 has an id that is not a string');
+    expect(text).not.toContain('Skipped');
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
+  for (const [field, param] of [
+    ['message', 'message'],
+    ['authorName', 'author_name'],
+    ['authorEmail', 'author_email'],
+  ] as const) {
+    it(`refuses, without a POST, when a stored commit has no ${field}`, async () => {
+      const { [field]: _omitted, ...partial } = EXISTING[0];
+      const mock = new MockGlitchTip().json(
+        'GET',
+        `${API}/organizations/acme/releases/1.0.0/commits/`,
+        [partial, EXISTING[1]],
+      );
+      const { text, isError } = await call(mock, 'add_release_commits', {
+        organization: 'acme',
+        version: '1.0.0',
+        commits: [{ id: 'a3' }],
+      });
+      expect(isError).toBe(true);
+      expect(text).toContain(`GlitchTip's response did not include ${param} for stored commit 1`);
+      expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+    });
+  }
+
+  it('refuses, without a POST, when a stored commit field has the wrong type', async () => {
+    const mock = new MockGlitchTip().json(
+      'GET',
+      `${API}/organizations/acme/releases/1.0.0/commits/`,
+      [{ ...EXISTING[0], authorName: 7 }, EXISTING[1]],
+    );
+    const { text, isError } = await call(mock, 'add_release_commits', {
+      organization: 'acme',
+      version: '1.0.0',
+      commits: [{ id: 'a3' }],
+    });
+    expect(isError).toBe(true);
+    expect(text).toContain(
+      "GlitchTip's response returned author_name as something other than text or null for stored commit 1",
+    );
+    expect(mock.requests.map((r) => r.method)).toEqual(['GET']);
+  });
+
+  it('accepts a partial stored commit the caller sends again, since it is replaced whole', async () => {
+    const { authorEmail: _omitted, ...partial } = EXISTING[0];
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/organizations/acme/releases/1.0.0/commits/`, [partial, EXISTING[1]])
+      .json('POST', `${API}/organizations/acme/releases/1.0.0/commits/`, {
+        ...RELEASE,
+        commitCount: 2,
+      });
+    const { isError } = await call(mock, 'add_release_commits', {
+      organization: 'acme',
+      version: '1.0.0',
+      commits: [{ id: 'a1', message: 'first', author_email: 'dev@example.test' }],
+    });
+    expect(isError).toBe(false);
+    expect(JSON.parse(mock.requests[1].body)[0]).toEqual({
+      id: 'a1',
+      message: 'first',
+      authorName: '',
+      authorEmail: 'dev@example.test',
+    });
   });
 
   it('refuses when the merged list would exceed 1000, after GET but before POST', async () => {
-    const existing = Array.from({ length: 999 }, (_, i) => ({ id: `e${i}`, message: 'm' }));
+    const existing = Array.from({ length: 999 }, (_, i) => ({
+      id: `e${i}`,
+      message: 'm',
+      authorName: null,
+      authorEmail: null,
+    }));
     const mock = new MockGlitchTip().json(
       'GET',
       `${API}/organizations/acme/releases/1.0.0/commits/`,

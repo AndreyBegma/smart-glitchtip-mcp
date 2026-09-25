@@ -4,10 +4,10 @@ import { type McpContext, Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
 import { error } from '../../format/result';
 import { ToolOutput } from '../../format/tool-output';
-import type { components } from '../../glitchtip/generated/schema';
 import { InstanceResolver } from '../../glitchtip/instance.resolver';
 import { formatParam, mutation, organizationParam } from '../../mcp/tool-params';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
+import { mergeCommits } from './release-commits.merge';
 import { callForRelease, callForReleaseFile } from './release-errors';
 import {
   commitsChangedView,
@@ -26,8 +26,6 @@ import {
 import { DEPLOY_COMMIT_SCOPES, RELEASE_SCOPES } from './releases.scopes';
 
 // Registered only when GLITCHTIP_READ_ONLY=false (D-07); see toolset.registry.
-
-type CommitIn = components['schemas']['CommitIn'];
 
 /** GlitchTip stores up to this many commits per release (`create_commits`, spec §Tools). */
 const MAX_STORED_COMMITS = 1000;
@@ -344,7 +342,8 @@ export class ReleasesMutations {
     name: 'add_release_commits',
     description:
       'Attach commits to a release; commits already attached are kept unless their id is given ' +
-      'again, in which case they are updated in place. Scope: project:releases, project:write or ' +
+      'again, in which case they are updated in place. Refused, with nothing changed, if ' +
+      "GlitchTip's read of a stored commit is incomplete. Scope: project:releases, project:write or " +
       `project:admin. ${RELEASE_UNTRUSTED_NOTE}`,
     parameters: addReleaseCommitsArgs,
     annotations: {
@@ -368,44 +367,9 @@ export class ReleasesMutations {
       args.version,
     );
 
-    // A stored commit whose id is not actually a string (a malformed response — CommitSchema
-    // types it as `string`, but a real GlitchTip response is not guaranteed to match) cannot be
-    // re-sent as-is: CommitIn.id is a string, and GlitchTip 422s on anything else. Skip it and
-    // say so, rather than fail the whole call or crash (orchestrator re-review of #20).
-    const validExisting = existing.filter((c) => typeof c.id === 'string');
-    const skipped = existing.length - validExisting.length;
-
-    // Deduped by id first (last wins, stable position): a stored list that already carries a
-    // duplicate id must not end up with a stale copy the id-lookup below can never reach
-    // (orchestrator review of #20 nit).
-    const deduped = new Map<string, (typeof validExisting)[number]>();
-    for (const c of validExisting) deduped.set(c.id, c);
-    const merged: CommitIn[] = [...deduped.values()].map((c) => ({
-      id: c.id,
-      message: c.message ?? '',
-      authorName: c.authorName ?? '',
-      authorEmail: c.authorEmail ?? '',
-    }));
-    const indexById = new Map(merged.map((c, i) => [c.id, i]));
-    let added = 0;
-    let updated = 0;
-    for (const input of args.commits) {
-      const entry: CommitIn = {
-        id: input.id,
-        message: input.message ?? '',
-        authorName: input.author_name ?? '',
-        authorEmail: input.author_email ?? '',
-      };
-      const index = indexById.get(input.id);
-      if (index === undefined) {
-        indexById.set(input.id, merged.length);
-        merged.push(entry);
-        added++;
-      } else {
-        merged[index] = entry;
-        updated++;
-      }
-    }
+    const merge = mergeCommits(existing, args.commits);
+    if ('refusal' in merge) return error(merge.refusal);
+    const { commits: merged, added, updated } = merge;
     if (merged.length > MAX_STORED_COMMITS) {
       return error(
         `Not attached: the release would end up with ${merged.length} commits, over GlitchTip's ` +
@@ -425,9 +389,7 @@ export class ReleasesMutations {
       org,
       args.version,
     );
-    const summary =
-      `Added ${added}, updated ${updated} commits on release ${args.version} in ${org}.` +
-      (skipped > 0 ? ` Skipped ${skipped} previously stored commit(s) with a non-string id.` : '');
+    const summary = `Added ${added}, updated ${updated} commits on release ${args.version} in ${org}.`;
     return this.output.render(args.format, commitsChangedView(summary, releaseAfter));
   }
 

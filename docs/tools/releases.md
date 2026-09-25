@@ -286,14 +286,22 @@ place; new ids are appended.
 | `format` | `"text"` \| `"json"` | `text` |
 
 Stored commits with `null` fields are re-sent as `""` (`CommitIn`'s fields are
-non-nullable strings). A stored commit with a duplicate id keeps only its
-last occurrence; one whose id is not actually a string (a malformed response
-— `CommitIn.id` must be a string, and re-sending anything else is a
-GlitchTip 422) is skipped and counted, never re-sent. A merge that would
-exceed GlitchTip's 1000-commit limit is refused before the request. Output:
-how many were added and how many updated, how many stored commits were
-skipped for a non-string id (if any), and the release's resulting commit
-count.
+non-nullable strings). A stored commit with a duplicate id keeps its first
+position and its last occurrence's values. Because a commit left out of the
+`POST` is deleted and one re-sent with a default is overwritten, the tool
+refuses the whole call, with nothing written (AGENTS.md rule 15), when:
+
+- a stored commit's id is not a string (a malformed response — `CommitIn.id`
+  must be a string); it is never dropped;
+- a stored commit lacks `message`, `authorName` or `authorEmail` (or carries
+  one that is neither text nor `null`) and the caller does not send that
+  commit again. A commit sent again replaces the stored one whole, so a gap
+  in it is harmless.
+
+The refusal names the parameter and the stored commit's position, never its
+contents. A merge that would exceed GlitchTip's 1000-commit limit is refused
+before the request. Output: how many were added and how many updated, and the
+release's resulting commit count.
 
 ## `delete_release_file`
 
