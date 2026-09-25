@@ -11,6 +11,7 @@ import { CoreTools } from './mcp/core.tools';
 import { HttpAuthGuard } from './mcp/http-auth.guard';
 import { HealthController, mcpHttpController } from './mcp/mcp-http.controller';
 import { selectToolsets } from './mcp/toolset.registry';
+import type { ToolsetDefinition } from './toolsets/toolset';
 
 export interface AppModuleOptions {
   readonly config: AppConfig;
@@ -19,6 +20,8 @@ export interface AppModuleOptions {
   readonly httpTransport?: StreamableHttpTransport;
   /** Tests only: the fetch the GlitchTip client uses. */
   readonly fetch?: FetchLike;
+  /** Tests only: the toolset registry to select from instead of TOOLSETS. */
+  readonly toolsets?: readonly ToolsetDefinition[];
 }
 
 @Module({})
@@ -31,7 +34,7 @@ export class AppModule {
    */
   static forRoot(options: AppModuleOptions): DynamicModule {
     const { config, logger, httpTransport, fetch } = options;
-    const selection = selectToolsets(config.toolsets, config.readOnly);
+    const selection = selectToolsets(config, options.toolsets);
     for (const name of selection.unavailable) {
       logger.warn({ toolset: name }, `Toolset "${name}" is enabled but not yet available.`);
     }

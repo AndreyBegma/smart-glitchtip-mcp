@@ -2,6 +2,8 @@
 export interface Page<T> {
   readonly items: T[];
   readonly nextCursor?: string;
+  /** The list response's headers, for list headers other than `Link` (e.g. `X-Hits`). */
+  readonly headers: Headers;
 }
 
 /**

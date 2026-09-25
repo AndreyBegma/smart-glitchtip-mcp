@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig } from '../../src/config/config';
 import { TOOLSETS } from '../../src/mcp/toolset.registry';
 import { DEFAULT_TOOLSETS, TOOLSET_NAMES } from '../../src/toolsets/toolset';
-import { type Booted, bootInMemory } from '../support/boot';
+import { type Booted, bootInMemory, withPending } from '../support/boot';
 import { MockGlitchTip } from '../support/mock-glitchtip';
 
 // Review gate "registration" (AGENTS.md rule 4): read-only and disabled
@@ -113,16 +113,18 @@ describe('read-only across every toolset', () => {
 });
 
 describe('toolset selection (acceptance 4)', () => {
+  // The pending toolset is injected, so this holds once every real one ships.
   it('starts with a not-yet-available toolset, lists only whoami, and warns', async () => {
-    const pending = TOOLSETS.find((t) => !t.available);
-    if (!pending) throw new Error('expected at least one toolset to still be pending');
-    const tools = await toolsWith({
-      GLITCHTIP_TOOLSETS: pending.name,
-      GLITCHTIP_READ_ONLY: 'false',
-    });
+    const pending = TOOLSET_NAMES[TOOLSET_NAMES.length - 1];
+    booted = await bootInMemory(
+      { GLITCHTIP_TOKEN: 'tok', GLITCHTIP_TOOLSETS: pending, GLITCHTIP_READ_ONLY: 'false' },
+      new MockGlitchTip(),
+      { toolsets: withPending(pending) },
+    );
+    const { tools } = await booted.client.listTools();
     expect(tools.map((t) => t.name)).toEqual(['whoami']);
-    expect(booted?.logs()).toContain(`"toolset":"${pending.name}"`);
-    expect(booted?.logs()).toContain('is enabled but not yet available.');
+    expect(booted.logs()).toContain(`"toolset":"${pending}"`);
+    expect(booted.logs()).toContain('is enabled but not yet available.');
   });
 
   it('refuses startup for an unknown toolset, naming the valid ones', () => {

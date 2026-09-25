@@ -28,7 +28,7 @@ const HUGE_BUDGET = 1_000_000;
 
 describe('eventListView — null title/tags (review 9)', () => {
   it('falls back instead of throwing when title/tags arrive as null', () => {
-    const page = { items: [malformedListItem], nextCursor: undefined };
+    const page = { items: [malformedListItem], nextCursor: undefined, headers: new Headers() };
     expect(() => eventListView(page, { includeGroupId: false }, HUGE_BUDGET)).not.toThrow();
     const view = eventListView(page, { includeGroupId: false }, HUGE_BUDGET);
     const text = view.text();
@@ -53,6 +53,7 @@ describe('eventListView — null title/tags (review 9)', () => {
         },
       ],
       nextCursor: undefined,
+      headers: new Headers(),
     };
     const text = eventListView(page, { includeGroupId: false }, HUGE_BUDGET).text();
     expect(text.match(/<untrusted /g)).toHaveLength(1);
@@ -87,7 +88,7 @@ describe('format: "json" is unfenced, parseable JSON (review 6, final ruling)', 
   });
 
   it('eventListView.json() is a plain object with an events array, top level unfenced', () => {
-    const page = { items: [], nextCursor: undefined };
+    const page = { items: [], nextCursor: undefined, headers: new Headers() };
     const view = eventListView(page, { includeGroupId: false }, HUGE_BUDGET);
     const json = view.json() as { events: unknown[] };
     expect(Array.isArray(json.events)).toBe(true);

@@ -1,4 +1,5 @@
 import type { Type } from '@nestjs/common';
+import type { AppConfig } from '../config/config';
 
 /**
  * Every toolset name the server knows (D-06 and the roadmap's phase 2 rows).
@@ -38,11 +39,17 @@ export const DEFAULT_TOOLSETS: readonly ToolsetName[] = [
 /**
  * What a toolset contributes. `read` controllers are registered whenever the
  * toolset is enabled; `write` controllers only when the server is not
- * read-only (D-07). Registration is the only place either rule is enforced.
+ * read-only (D-07) and `writeEnabled`, if set, allows them. Registration is
+ * the only place either rule is enforced.
  */
 export interface ToolsetDefinition {
   readonly name: ToolsetName;
   readonly read: readonly Type[];
   readonly write: readonly Type[];
   readonly available: boolean;
+  /**
+   * A further condition on registering `write`, read from configuration
+   * (e.g. an opt-in key). It can only remove writes: read-only mode wins.
+   */
+  readonly writeEnabled?: (config: AppConfig) => boolean;
 }

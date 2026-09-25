@@ -1,4 +1,5 @@
 import type { Type } from '@nestjs/common';
+import type { AppConfig } from '../config/config';
 import { toolset as admin } from '../toolsets/admin';
 import { toolset as alerts } from '../toolsets/alerts';
 import { toolset as apiRequest } from '../toolsets/api_request';
@@ -55,16 +56,22 @@ export interface ToolsetSelection {
  * `tools/list` and unknown to `tools/call` (AGENTS.md rule 4).
  */
 export function selectToolsets(
-  enabled: readonly ToolsetName[],
-  readOnly: boolean,
+  config: AppConfig,
+  /** Tests only: a registry to select from instead of TOOLSETS. */
+  toolsets: readonly ToolsetDefinition[] = TOOLSETS,
 ): ToolsetSelection {
   const controllers: Type[] = [];
   const unavailable: ToolsetName[] = [];
-  for (const toolset of TOOLSETS) {
-    if (!enabled.includes(toolset.name)) continue;
+  for (const toolset of toolsets) {
+    if (!config.toolsets.includes(toolset.name)) continue;
     if (!toolset.available) unavailable.push(toolset.name);
     controllers.push(...toolset.read);
-    if (!readOnly) controllers.push(...toolset.write);
+    if (writesAllowed(toolset, config)) controllers.push(...toolset.write);
   }
   return { controllers, unavailable };
+}
+
+function writesAllowed(toolset: ToolsetDefinition, config: AppConfig): boolean {
+  if (config.readOnly) return false;
+  return toolset.writeEnabled === undefined || toolset.writeEnabled(config);
 }

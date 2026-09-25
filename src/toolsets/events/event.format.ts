@@ -39,6 +39,7 @@ export function eventListView(
 ): View {
   const rows = page.items.map(toListRow);
   return {
+    untrusted: { field: 'payload', source: 'glitchtip-event' },
     text: () => {
       if (rows.length === 0) return 'No events found.';
       const lines = rows.map((row) => renderListLine(row, options.includeGroupId));
@@ -104,6 +105,7 @@ function renderListLine(row: ListRow, includeGroupId: boolean): string {
 export function eventDetailView(event: EventDetail, options: RenderOptions, budget: number): View {
   const parsed = parseEvent(event);
   return {
+    untrusted: { field: 'payload', source: 'glitchtip-event' },
     text: () => renderEventDetailText(parsed, options, budget),
     json: () => renderEventDetailJson(parsed, options, budget),
   };
@@ -119,6 +121,7 @@ export function eventJsonView(raw: unknown, pointer: string | undefined, budget:
   const redacted = redactEventPayload(raw);
   const selected = pointer === undefined ? redacted : applyJsonPointer(redacted, pointer);
   return {
+    untrusted: { field: 'payload', source: 'glitchtip-event' },
     text: () => boundedText(selected, budget),
     json: () => boundedJson(selected, budget),
   };

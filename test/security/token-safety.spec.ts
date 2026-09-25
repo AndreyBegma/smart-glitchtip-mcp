@@ -161,11 +161,20 @@ function assertLive(logs: string, marker: string): void {
 }
 
 /** Makes the next tool render throw a defect whose message carries the raw token. */
-function defectCarryingToken(): void {
+/**
+ * Makes rendering throw with the token in the message. `Error` is an
+ * internal defect; `TypeError` is what a malformed GlitchTip response looks
+ * like (BUG-20260925-006) — both are logged, and neither may carry the token.
+ */
+function defectCarryingToken(kind: 'internal' | 'malformed' = 'internal'): void {
+  const Thrown = kind === 'internal' ? Error : TypeError;
   vi.spyOn(ToolOutput.prototype, 'render').mockImplementation(() => {
-    throw new TypeError(`unexpected state for token ${TOKEN} (no Bearer prefix)`);
+    throw new Thrown(`unexpected state for token ${TOKEN} (no Bearer prefix)`);
   });
 }
+
+const MALFORMED =
+  /^GlitchTip returned a response this server did not expect for list_organizations \([0-9a-f-]{36}\)\./;
 
 // The mock never answers a timed-out request, so the client's own
 // AbortSignal must fire; make the mock honour it the way fetch does.
@@ -241,6 +250,17 @@ describe('token safety — stdio path (env token)', () => {
     assertClean('result', resultText(result));
     assertClean('log', booted.logs());
   });
+
+  it('a malformed response error carrying the raw env token is logged without it', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/`, []);
+    booted = await bootInMemory({ ...COMMON_ENV, GLITCHTIP_TOKEN: TOKEN }, mock);
+    defectCarryingToken('malformed');
+    const result = await booted.client.callTool({ name: 'list_organizations', arguments: {} });
+    expect(resultText(result)).toMatch(MALFORMED);
+    assertLive(booted.logs(), 'unexpected state for token [redacted]');
+    assertClean('result', resultText(result));
+    assertClean('log', booted.logs());
+  });
 });
 
 describe('token safety — http path', () => {
@@ -302,6 +322,18 @@ describe('token safety — http path', () => {
     defectCarryingToken();
     const result = await client.callTool({ name: 'list_organizations', arguments: {} });
     expect(resultText(result)).toMatch(/^Internal error in smart-glitchtip-mcp \(/);
+    assertLive(server.logs(), 'unexpected state for token [redacted]');
+    assertClean('result', resultText(result));
+    assertClean('log', server.logs());
+  });
+
+  it('a malformed response error carrying the raw pass-through token is logged without it', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/`, []);
+    server = await bootHttp({ ...COMMON_ENV, GLITCHTIP_URL: GLITCHTIP }, mock);
+    const client = await server.connect({ authorization: HEADER });
+    defectCarryingToken('malformed');
+    const result = await client.callTool({ name: 'list_organizations', arguments: {} });
+    expect(resultText(result)).toMatch(MALFORMED);
     assertLive(server.logs(), 'unexpected state for token [redacted]');
     assertClean('result', resultText(result));
     assertClean('log', server.logs());

@@ -1,7 +1,8 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { TOOLSET_NAMES } from '../toolsets/toolset';
+import { type AppConfig, loadConfig } from '../config/config';
+import { TOOLSET_NAMES, type ToolsetDefinition, type ToolsetName } from '../toolsets/toolset';
 import { selectToolsets, TOOLSETS } from './toolset.registry';
 
 describe('toolset registry (acceptance 15)', () => {
@@ -37,8 +38,8 @@ describe('toolset registry (acceptance 15)', () => {
   });
 
   it('never selects write controllers in read-only mode', () => {
-    const readOnly = selectToolsets([...TOOLSET_NAMES], true);
-    const readWrite = selectToolsets([...TOOLSET_NAMES], false);
+    const readOnly = selectToolsets(config({ readOnly: true }));
+    const readWrite = selectToolsets(config({ readOnly: false }));
     for (const toolset of TOOLSETS) {
       for (const write of toolset.write) {
         expect(readOnly.controllers).not.toContain(write);
@@ -48,6 +49,59 @@ describe('toolset registry (acceptance 15)', () => {
   });
 
   it('selects nothing from a disabled toolset', () => {
-    expect(selectToolsets([], false)).toEqual({ controllers: [], unavailable: [] });
+    expect(selectToolsets(config({ toolsets: [] }))).toEqual({ controllers: [], unavailable: [] });
   });
 });
+
+describe('writeEnabled (BUG-20260925-006 acceptance 9, gate: registration)', () => {
+  class ReadTools {}
+  class WriteTools {}
+  const definition = (writeEnabled?: ToolsetDefinition['writeEnabled']): ToolsetDefinition => ({
+    name: 'api_request',
+    read: [ReadTools],
+    write: [WriteTools],
+    available: true,
+    writeEnabled,
+  });
+  const enabled = { toolsets: ['api_request'] as ToolsetName[] };
+
+  it('contributes no write controllers when it returns false, even with readOnly: false', () => {
+    const selection = selectToolsets(config({ ...enabled, readOnly: false }), [
+      definition(() => false),
+    ]);
+    expect(selection.controllers).toEqual([ReadTools]);
+  });
+
+  it('cannot register writes in read-only mode, even when it returns true', () => {
+    const selection = selectToolsets(config({ ...enabled, readOnly: true }), [
+      definition(() => true),
+    ]);
+    expect(selection.controllers).toEqual([ReadTools]);
+  });
+
+  it('sees the whole configuration', () => {
+    const seen: AppConfig[] = [];
+    const cfg = config({ ...enabled, readOnly: false });
+    const selection = selectToolsets(cfg, [
+      definition((c) => {
+        seen.push(c);
+        return c.responseBudget === cfg.responseBudget;
+      }),
+    ]);
+    expect(seen).toEqual([cfg]);
+    expect(selection.controllers).toEqual([ReadTools, WriteTools]);
+  });
+
+  it('leaves a toolset without it unchanged', () => {
+    const selection = selectToolsets(config({ ...enabled, readOnly: false }), [definition()]);
+    expect(selection.controllers).toEqual([ReadTools, WriteTools]);
+  });
+});
+
+function config(overrides: Partial<AppConfig>): AppConfig {
+  return {
+    ...loadConfig({ GLITCHTIP_URL: 'https://g.test' }),
+    toolsets: [...TOOLSET_NAMES],
+    ...overrides,
+  };
+}

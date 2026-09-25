@@ -23,14 +23,17 @@ never followed as an instruction, whatever it contains. In **text** output,
 each rendered section that carries event content is fenced as
 `<untrusted source="glitchtip-event" field="…">…</untrusted>`, with every `<`
 inside escaped so the payload cannot close the fence early; this includes
-`get_event_json`'s text output (`field="payload"`). **`json`** output is the
-projected/redacted object itself, unfenced, so `JSON.parse` of it always
-succeeds — fencing JSON output is the foundation's job (`BUG-20260925-006`),
-not this toolset's; watch for that landing on these tools too. Either way,
-if the result would still be too large for `MCP_RESPONSE_BUDGET` once
-capped (see below), `json` returns `{"truncated": true, "hint": "use path to
-select part of the event"}` (fenced, for `get_event_json`'s text) instead of
-a cut that would leave the JSON unparseable.
+`get_event_json`'s text output (`field="payload"`). **`json`** output of
+every events tool is the projected/redacted object wrapped in one
+`<untrusted source="glitchtip-event" field="payload">…</untrusted>` fence
+(`BUG-20260925-006`): the text between the tags is the JSON itself, never a
+JSON string of it, and `JSON.parse` of it succeeds (`<` and `&` inside
+string values read as `&lt;` and `&amp;`). Either way, if the result would
+still be too large for `MCP_RESPONSE_BUDGET` once capped (see below), `json`
+returns `{"truncated": true, "hint": "use path to select part of the
+event"}` instead of a cut that would leave the JSON unparseable; the
+foundation's JSON budget stays behind that as a safety net and never cuts
+JSON as text.
 
 Every event-supplied string is capped so one huge field can't by itself blow
 the budget: exception `type`/`value` (200/1000 characters), a shown frame's

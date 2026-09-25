@@ -32,6 +32,7 @@ export function issueListView(
 ): View {
   const issues = page.items;
   return {
+    untrusted: { field: 'payload', source: 'glitchtip-event' },
     text: () => {
       if (issues.length === 0) {
         const where = project ? `${org}/${project}` : org;
@@ -77,6 +78,7 @@ export function issueListView(
 
 export function issueDetailView(issue: IssueDetail): View {
   return {
+    untrusted: { field: 'payload', source: 'glitchtip-event' },
     text: () => {
       const body = keyValues([
         ['shortId', issue.shortId],

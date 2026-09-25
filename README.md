@@ -91,7 +91,7 @@ value), and exit code 1.
 | `GLITCHTIP_TOOLSETS` | comma list, default `organizations,issues,events,projects`; `all` allowed | enabled toolsets |
 | `GLITCHTIP_READ_ONLY` | bool, default `true` | `false` registers the tools that change or delete data |
 | `GLITCHTIP_TIMEOUT_MS` | int, default `15000` | timeout of each request to GlitchTip |
-| `MCP_RESPONSE_BUDGET` | int chars, default `20000` | maximum size of a tool result; longer results are truncated and say so |
+| `MCP_RESPONSE_BUDGET` | int chars, default `20000` | maximum size of a tool result; longer results are truncated and say so — `format: "json"` results stay valid JSON, marked `"truncated": true` |
 | `LOG_LEVEL` | pino level, default `info` | log level (logs go to stderr; HTTP request lines carry method, path and a short list of harmless headers, never credentials) |
 
 Known toolsets: `organizations`, `issues`, `events`, `projects`, `teams`,

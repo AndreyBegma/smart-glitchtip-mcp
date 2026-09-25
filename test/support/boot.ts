@@ -8,7 +8,9 @@ import { startHttp } from '../../src/bootstrap';
 import { loadConfig } from '../../src/config/config';
 import type { LogLevel } from '../../src/config/config.schema';
 import { createLogger, nestLogger } from '../../src/logging/logger';
+import { TOOLSETS } from '../../src/mcp/toolset.registry';
 import { serverOptions } from '../../src/mcp/transports';
+import type { ToolsetDefinition, ToolsetName } from '../../src/toolsets/toolset';
 import { captureStream } from './capture-stream';
 import { InMemoryMcpTransport } from './in-memory-transport';
 import type { MockGlitchTip } from './mock-glitchtip';
@@ -31,13 +33,19 @@ export async function bootInMemory(
   env: NodeJS.ProcessEnv,
   /** Omitted only by the e2e suite, which talks to a real instance. */
   mock?: MockGlitchTip,
+  options: {
+    /** A registry to select from instead of TOOLSETS (see `withPending`). */
+    readonly toolsets?: readonly ToolsetDefinition[];
+  } = {},
 ): Promise<Booted> {
   const config = loadConfig({ GLITCHTIP_URL: GLITCHTIP, LOG_LEVEL: 'debug', ...env });
   const { sink, logger } = await freshLogger(config.logLevel);
   const transport = new InMemoryMcpTransport();
   const strategy = new McpStrategy(serverOptions(config, [transport]));
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ config, logger, fetch: mock?.fetch })],
+    imports: [
+      AppModule.forRoot({ config, logger, fetch: mock?.fetch, toolsets: options.toolsets }),
+    ],
   }).compile();
   const app: INestMicroservice = moduleRef.createNestMicroservice({
     strategy,
@@ -106,6 +114,17 @@ async function freshLogger(level: LogLevel) {
   await resetNestjsPino();
   const sink = captureStream();
   return { sink, logger: createLogger({ level, destination: sink.stream }) };
+}
+
+/**
+ * The real registry with `pending` turned into a not-yet-available toolset
+ * that contributes no controllers — so a test of the "not yet available"
+ * path keeps working once every real toolset has shipped.
+ */
+export function withPending(pending: ToolsetName): readonly ToolsetDefinition[] {
+  return TOOLSETS.map((toolset) =>
+    toolset.name === pending ? { name: pending, read: [], write: [], available: false } : toolset,
+  );
 }
 
 /** The concatenated text of a tool result. */

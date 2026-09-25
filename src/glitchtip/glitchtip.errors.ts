@@ -7,6 +7,7 @@ export type GlitchTipErrorKind =
   | 'not_found'
   | 'rate_limited'
   | 'upstream'
+  | 'malformed'
   | 'timeout'
   | 'unreachable';
 
@@ -106,9 +107,26 @@ export function unreachableError(origin: string): GlitchTipError {
 
 export function malformedResponseError(): GlitchTipError {
   return new GlitchTipError(
-    'upstream',
+    'malformed',
     'GlitchTip answered with a body that is not valid JSON; is the instance URL pointing at GlitchTip?',
   );
+}
+
+/** A list endpoint answered 2xx with something other than an array. */
+export function malformedListError({ name }: Operation): GlitchTipError {
+  return new GlitchTipError(
+    'malformed',
+    `GlitchTip answered ${name} with something other than a list. The request itself succeeded; the instance may run a GlitchTip version this server does not know.`,
+  );
+}
+
+/**
+ * A request the client refused to send: a path parameter that is not one
+ * segment, or a raw path outside the instance's API. Names the rule, never
+ * the value.
+ */
+export function refusedRequestError(reason: string): GlitchTipError {
+  return new GlitchTipError('invalid', reason);
 }
 
 function forbiddenMessage({ name, scopes, requirement }: Operation): string {
