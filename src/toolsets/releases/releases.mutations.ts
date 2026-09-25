@@ -368,11 +368,18 @@ export class ReleasesMutations {
       args.version,
     );
 
+    // A stored commit whose id is not actually a string (a malformed response — CommitSchema
+    // types it as `string`, but a real GlitchTip response is not guaranteed to match) cannot be
+    // re-sent as-is: CommitIn.id is a string, and GlitchTip 422s on anything else. Skip it and
+    // say so, rather than fail the whole call or crash (orchestrator re-review of #20).
+    const validExisting = existing.filter((c) => typeof c.id === 'string');
+    const skipped = existing.length - validExisting.length;
+
     // Deduped by id first (last wins, stable position): a stored list that already carries a
     // duplicate id must not end up with a stale copy the id-lookup below can never reach
     // (orchestrator review of #20 nit).
-    const deduped = new Map<string, (typeof existing)[number]>();
-    for (const c of existing) deduped.set(c.id, c);
+    const deduped = new Map<string, (typeof validExisting)[number]>();
+    for (const c of validExisting) deduped.set(c.id, c);
     const merged: CommitIn[] = [...deduped.values()].map((c) => ({
       id: c.id,
       message: c.message ?? '',
@@ -418,7 +425,9 @@ export class ReleasesMutations {
       org,
       args.version,
     );
-    const summary = `Added ${added}, updated ${updated} commits on release ${args.version} in ${org}.`;
+    const summary =
+      `Added ${added}, updated ${updated} commits on release ${args.version} in ${org}.` +
+      (skipped > 0 ? ` Skipped ${skipped} previously stored commit(s) with a non-string id.` : '');
     return this.output.render(args.format, commitsChangedView(summary, releaseAfter));
   }
 

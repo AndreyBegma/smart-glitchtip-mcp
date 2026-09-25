@@ -336,10 +336,15 @@ export function releaseFileListView(
         [
           { header: 'id', value: (f) => f.id },
           { header: 'size', value: (f) => humanSize(f.size ?? 0) },
-          { header: 'sha1', value: (f) => f.sha1 ?? '-' },
           { header: 'created', value: (f) => f.dateCreated },
         ],
-        (f) => untrusted('name', truncate(f.name ?? '', FIELD_CAP), 'glitchtip-config'),
+        (f) => {
+          const name = untrusted('name', truncate(f.name ?? '', FIELD_CAP), 'glitchtip-config');
+          const sha1 = f.sha1
+            ? `  ${untrusted('sha1', truncate(f.sha1, FIELD_CAP), 'glitchtip-config')}`
+            : '';
+          return `${name}${sha1}`;
+        },
       );
       return withCursor(body, page.nextCursor);
     },
@@ -363,9 +368,14 @@ export function releaseFileDetailView(version: string, file: ReleaseFile): View 
     text: () => {
       const headers = Object.entries(file.headers ?? {})
         .map(([key, value]) => {
-          // A header key is server/CI-set, same as its value: flattened and fenced so a key
-          // carrying "\n" cannot forge extra lines in the output (orchestrator review of #20).
-          const fencedKey = untrusted('headers.key', flatten(key ?? ''), 'glitchtip-config');
+          // A header key is server/CI-set, same as its value: flattened, length-capped and
+          // fenced, so a key carrying "\n" cannot forge extra lines and an oversized one cannot
+          // dominate the response budget (orchestrator review of #20).
+          const fencedKey = untrusted(
+            'headers.key',
+            truncate(key ?? '', FIELD_CAP),
+            'glitchtip-config',
+          );
           const fencedValue = untrusted(
             'headers.value',
             truncate(value ?? '', FIELD_CAP),

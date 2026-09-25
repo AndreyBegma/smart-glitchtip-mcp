@@ -164,9 +164,11 @@ List the source-map and artifact bundles attached to a release.
 | `cursor` | string | first page |
 | `format` | `"text"` \| `"json"` | `text` |
 
-Text output is a table (`id`, `size` in human units, `sha1`, `created`) with
-the fenced name appended to each row. Empty: `No files attached to release
-<version> in <org>[/<project>].`
+Text output is a table (`id`, `size` in human units, `created`) with the
+fenced name and sha1 appended to each row — sha1 is fenced rather than a
+table column, matching `get_release_file`, since `table()`'s cell cut isn't
+fence-aware. Empty: `No files attached to release <version> in
+<org>[/<project>].`
 
 ## `get_release_file`
 
@@ -182,8 +184,10 @@ headers. File contents are not available through this tool.
 | `format` | `"text"` \| `"json"` | `text` |
 
 Each header line renders as `<fenced key>: <fenced value>`: the key is a
-build-tool-set string same as its value, flattened and fenced so a key
-carrying a control character cannot forge extra lines in the output.
+build-tool-set string same as its value, flattened, capped at ~2000
+characters and fenced, so a key carrying a control character cannot forge
+extra lines in the output and an oversized one cannot dominate the response
+budget.
 
 ## `list_repositories`
 
@@ -282,9 +286,14 @@ place; new ids are appended.
 | `format` | `"text"` \| `"json"` | `text` |
 
 Stored commits with `null` fields are re-sent as `""` (`CommitIn`'s fields are
-non-nullable strings). A merge that would exceed GlitchTip's 1000-commit limit
-is refused before the request. Output: how many were added and how many
-updated, and the release's resulting commit count.
+non-nullable strings). A stored commit with a duplicate id keeps only its
+last occurrence; one whose id is not actually a string (a malformed response
+— `CommitIn.id` must be a string, and re-sending anything else is a
+GlitchTip 422) is skipped and counted, never re-sent. A merge that would
+exceed GlitchTip's 1000-commit limit is refused before the request. Output:
+how many were added and how many updated, how many stored commits were
+skipped for a non-string id (if any), and the release's resulting commit
+count.
 
 ## `delete_release_file`
 
