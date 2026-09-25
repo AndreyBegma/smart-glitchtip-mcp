@@ -7,7 +7,12 @@ import { ToolOutput } from '../../format/tool-output';
 import { InstanceResolver } from '../../glitchtip/instance.resolver';
 import { formatParam, mutation, organizationParam } from '../../mcp/tool-params';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
-import { callForCreateTeam, callForDeleteTeam, callForRenameTeam } from './team-errors';
+import {
+  callForCreateTeam,
+  callForDeleteTeam,
+  callForRenameTeam,
+  callForTeamMembership,
+} from './team-errors';
 import { resultView, teamDetailView } from './teams.format';
 import { memberOrMeParam, newTeamSlugParam, teamParam } from './teams.params';
 import { TEAM_ADMIN_SCOPES, TEAM_CREATE_SCOPES, TEAM_WRITE_SCOPES } from './teams.scopes';
@@ -168,23 +173,28 @@ export class TeamsMutations {
   ): Promise<CallToolResult> {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
-    const team = await glitchtip.client.call(
-      {
-        name: 'add member to team',
-        scopes: TEAM_WRITE_SCOPES,
-        resource: 'Team',
-        id: args.team,
-        org,
-      },
-      (api) =>
-        api.POST(
-          '/api/0/organizations/{organization_slug}/members/{member_id}/teams/{team_slug}/',
-          {
-            params: {
-              path: { organization_slug: org, member_id: args.member, team_slug: args.team },
+    const team = await callForTeamMembership(
+      glitchtip.client.call(
+        {
+          name: 'add member to team',
+          scopes: TEAM_WRITE_SCOPES,
+          resource: 'Team',
+          id: args.team,
+          org,
+        },
+        (api) =>
+          api.POST(
+            '/api/0/organizations/{organization_slug}/members/{member_id}/teams/{team_slug}/',
+            {
+              params: {
+                path: { organization_slug: org, member_id: args.member, team_slug: args.team },
+              },
             },
-          },
-        ),
+          ),
+      ),
+      org,
+      args.member,
+      args.team,
     );
     if (!team) {
       return this.output.render(
@@ -214,23 +224,28 @@ export class TeamsMutations {
   ): Promise<CallToolResult> {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
-    const team = await glitchtip.client.call(
-      {
-        name: 'remove member from team',
-        scopes: TEAM_WRITE_SCOPES,
-        resource: 'Team',
-        id: args.team,
-        org,
-      },
-      (api) =>
-        api.DELETE(
-          '/api/0/organizations/{organization_slug}/members/{member_id}/teams/{team_slug}/',
-          {
-            params: {
-              path: { organization_slug: org, member_id: args.member, team_slug: args.team },
+    const team = await callForTeamMembership(
+      glitchtip.client.call(
+        {
+          name: 'remove member from team',
+          scopes: TEAM_WRITE_SCOPES,
+          resource: 'Team',
+          id: args.team,
+          org,
+        },
+        (api) =>
+          api.DELETE(
+            '/api/0/organizations/{organization_slug}/members/{member_id}/teams/{team_slug}/',
+            {
+              params: {
+                path: { organization_slug: org, member_id: args.member, team_slug: args.team },
+              },
             },
-          },
-        ),
+          ),
+      ),
+      org,
+      args.member,
+      args.team,
     );
     if (!team) {
       return this.output.render(

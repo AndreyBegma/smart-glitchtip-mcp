@@ -13,7 +13,7 @@ import {
 } from '../../mcp/tool-params';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
 import { callForMember } from './member-not-found';
-import { memberDetailView, memberListView } from './members.format';
+import { memberDetailView, memberListView, resultView } from './members.format';
 import { memberIdParam, teamFilterParam } from './members.params';
 import { MEMBER_READ_SCOPES } from './members.scopes';
 
@@ -118,6 +118,12 @@ export class MembersTools {
       org,
       args.member_id,
     );
+    if (!member) {
+      return this.output.render(
+        args.format,
+        resultView(`Member ${args.member_id} in ${org}: GlitchTip returned no body (?).`),
+      );
+    }
     return this.output.render(args.format, memberDetailView(member));
   }
 }

@@ -12,7 +12,7 @@ import {
   READ_ONLY,
 } from '../../mcp/tool-params';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
-import { teamDetailView, teamListView } from './teams.format';
+import { resultView, teamDetailView, teamListView } from './teams.format';
 import { teamParam } from './teams.params';
 import { TEAM_LIST_SCOPES, TEAM_READ_SCOPES } from './teams.scopes';
 
@@ -90,6 +90,12 @@ export class TeamsTools {
           params: { path: { organization_slug: org, team_slug: args.team } },
         }),
     );
+    if (!team) {
+      return this.output.render(
+        args.format,
+        resultView(`Team ${args.team} in ${org}: GlitchTip returned no body (?).`),
+      );
+    }
     return this.output.render(args.format, teamDetailView(team));
   }
 }

@@ -71,3 +71,45 @@ export function callForDeleteTeam<T>(call: Promise<T>, org: string, team: string
     `Team ${team} was not found in ${org}, or your organization role is below admin.`,
   );
 }
+
+/**
+ * Appends GlitchTip's role rule to a 403 (spec §Errors: "for the team
+ * membership tools it adds GlitchTip's role rule in one sentence").
+ */
+async function rewriteMembershipForbidden<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (err) {
+    if (err instanceof GlitchTipError && err.kind === 'forbidden') {
+      throw new GlitchTipError(
+        'forbidden',
+        `${err.message} GlitchTip's rule: self-join is allowed with open membership; otherwise ` +
+          'your organization role must be manager or higher (admin if you are already a member ' +
+          'of the team).',
+        err.status,
+        err.detail,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * add_member_to_team / remove_member_from_team's 404 could name either the
+ * member or the team not found; the route looks both up before dispatching
+ * to the handler, and GlitchTip's response does not say which. Their 403
+ * gets GlitchTip's role rule appended.
+ */
+export function callForTeamMembership<T>(
+  call: Promise<T>,
+  org: string,
+  member: number | 'me',
+  team: string,
+): Promise<T> {
+  return rewriteMembershipForbidden(
+    rewriteNotFound(
+      call,
+      `Member ${member} or team ${team} was not found in ${org}. Member ids come from list_members.`,
+    ),
+  );
+}

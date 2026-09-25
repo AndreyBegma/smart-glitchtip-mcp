@@ -60,17 +60,43 @@ const transferOwnershipArgs = z.object({
   format: formatParam,
 });
 
-/** invite_member's 409 ("already invited") gets the reinvite hint appended; every other error passes through. */
+/**
+ * invite_member's 409 ("already invited") gets the reinvite hint appended,
+ * keeping GlitchTip's own "GlitchTip returned 409" framing and detail; every
+ * other error passes through.
+ */
 async function withReinviteHint<T>(call: Promise<T>): Promise<T> {
   try {
     return await call;
   } catch (err) {
     if (err instanceof GlitchTipError && err.status === 409) {
-      const base = err.detail ?? err.message;
-      const hint = /already invited/i.test(base)
+      const detail = err.detail ?? '';
+      const hint = /already invited/i.test(detail)
         ? ' Pass `reinvite: true` to send the invite again.'
         : '';
-      throw new GlitchTipError('upstream', `${base}${hint}`, err.status, err.detail);
+      const message = detail ? `${err.message} ${detail}${hint}` : `${err.message}${hint}`;
+      throw new GlitchTipError('upstream', message, err.status, err.detail);
+    }
+    throw err;
+  }
+}
+
+/**
+ * update_member_role's 422 on demoting the organization's last owner
+ * (spec §Errors) — GlitchTip's own wording for this varies by version, so
+ * the message is replaced outright rather than appended to.
+ */
+async function withLastOwnerRule<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (err) {
+    if (err instanceof GlitchTipError && err.status === 422) {
+      throw new GlitchTipError(
+        'invalid',
+        'The organization must keep at least one owner.',
+        err.status,
+        err.detail,
+      );
     }
     throw err;
   }
@@ -87,7 +113,8 @@ export class MembersMutations {
     name: 'invite_member',
     description:
       'Invite someone to the organization by email with an organization role and optional teams. ' +
-      `GlitchTip always sends the invite email. Scope: member:write or member:admin. ${UNTRUSTED_NOTE}`,
+      'GlitchTip always sends the invite email. Needs the manager organization role or higher. ' +
+      `Scope: member:write or member:admin. ${UNTRUSTED_NOTE}`,
     parameters: inviteMemberArgs,
     annotations: { title: 'Invite member', ...mutation({ destructive: false, idempotent: false }) },
   })
@@ -129,7 +156,7 @@ export class MembersMutations {
   @Tool({
     name: 'update_member_role',
     description:
-      "Change a member's organization role. " +
+      "Change a member's organization role. Needs the manager organization role or higher. " +
       `Scope: member:write or member:admin. ${UNTRUSTED_NOTE}`,
     parameters: updateMemberRoleArgs,
     annotations: {
@@ -144,19 +171,21 @@ export class MembersMutations {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
     const updated = await callForMember(
-      glitchtip.client.call(
-        {
-          name: 'update member role',
-          scopes: MEMBER_WRITE_SCOPES,
-          resource: 'Member',
-          id: args.member_id,
-          org,
-        },
-        (api) =>
-          api.PUT('/api/0/organizations/{organization_slug}/members/{member_id}/', {
-            params: { path: { organization_slug: org, member_id: args.member_id } },
-            body: { orgRole: args.role },
-          }),
+      withLastOwnerRule(
+        glitchtip.client.call(
+          {
+            name: 'update member role',
+            scopes: MEMBER_WRITE_SCOPES,
+            resource: 'Member',
+            id: args.member_id,
+            org,
+          },
+          (api) =>
+            api.PUT('/api/0/organizations/{organization_slug}/members/{member_id}/', {
+              params: { path: { organization_slug: org, member_id: args.member_id } },
+              body: { orgRole: args.role },
+            }),
+        ),
       ),
       org,
       args.member_id,

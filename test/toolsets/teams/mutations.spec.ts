@@ -194,7 +194,7 @@ describe('add_member_to_team', () => {
     expect(isError).toBe(false);
   });
 
-  it('maps 403 to the team-write scopes', async () => {
+  it('maps 403 to the team-write scopes plus GlitchTip’s role rule', async () => {
     const mock = new MockGlitchTip().json(
       'POST',
       `${API}/organizations/acme/members/7/teams/core/`,
@@ -207,7 +207,9 @@ describe('add_member_to_team', () => {
       team: 'core',
     });
     expect(text).toBe(
-      'The token lacks permission for add member to team. It needs one of: team:write, team:admin.',
+      'The token lacks permission for add member to team. It needs one of: team:write, team:admin. ' +
+        "GlitchTip's rule: self-join is allowed with open membership; otherwise your organization " +
+        'role must be manager or higher (admin if you are already a member of the team).',
     );
   });
 });
@@ -231,7 +233,7 @@ describe('remove_member_from_team', () => {
     expect(text).toContain('memberCount: 0');
   });
 
-  it('maps 404 to a message naming the team', async () => {
+  it('maps 404 to a message naming both the member and the team', async () => {
     const mock = new MockGlitchTip().json(
       'DELETE',
       `${API}/organizations/acme/members/7/teams/gone/`,
@@ -244,6 +246,8 @@ describe('remove_member_from_team', () => {
       team: 'gone',
     });
     expect(isError).toBe(true);
-    expect(text).toBe('Team gone was not found in acme.');
+    expect(text).toBe(
+      'Member 7 or team gone was not found in acme. Member ids come from list_members.',
+    );
   });
 });

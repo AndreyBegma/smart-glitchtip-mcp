@@ -162,8 +162,10 @@ describe('invite_member', () => {
       role: 'member',
     });
     expect(isError).toBe(true);
-    expect(text).toContain('already invited');
-    expect(text).toContain('Pass `reinvite: true` to send the invite again.');
+    expect(text).toBe(
+      'GlitchTip returned 409. dev@example.test is already invited Pass `reinvite: true` to ' +
+        'send the invite again.',
+    );
   });
 
   it('maps 429 to the rate-limit message', async () => {
@@ -199,11 +201,11 @@ describe('update_member_role', () => {
     expect(text).toContain('role: admin');
   });
 
-  it('passes through the last-owner 422', async () => {
+  it('rewrites the last-owner 422 to a fixed message, regardless of GlitchTip’s own wording', async () => {
     const mock = new MockGlitchTip().json(
       'PUT',
       `${API}/organizations/acme/members/7/`,
-      { detail: 'The organization must keep at least one owner.' },
+      { detail: 'orgUser role cannot be changed: only owner in organization.' },
       { status: 422 },
     );
     const { text, isError } = await call(mock, 'update_member_role', {
@@ -212,7 +214,8 @@ describe('update_member_role', () => {
       role: 'member',
     });
     expect(isError).toBe(true);
-    expect(text).toContain('The organization must keep at least one owner.');
+    expect(text).toBe('The organization must keep at least one owner.');
+    expect(text).not.toContain('only owner in organization');
   });
 
   it('maps 404 to a message pointing at list_members', async () => {

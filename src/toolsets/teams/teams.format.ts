@@ -98,6 +98,6 @@ function projectSlugsSummary(projects: readonly Project[] | null | undefined): s
   return `${shown.join(', ')}, +${slugs.length - PROJECT_LIST_LIMIT} more`;
 }
 
-function day(iso: string): string {
-  return iso.slice(0, 10);
+function day(iso: string | null | undefined): string {
+  return iso ? iso.slice(0, 10) : '?';
 }

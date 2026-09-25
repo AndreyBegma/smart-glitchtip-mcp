@@ -46,6 +46,28 @@ describe('get_team', () => {
     expect(text).toContain('projects: none');
   });
 
+  it('marks a null dateCreated with "?" instead of throwing', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/teams/acme/core/`, {
+      ...malformedTeam,
+      dateCreated: null,
+    });
+    const { text, isError } = await call(mock, 'get_team', { organization: 'acme', team: 'core' });
+    expect(isError).toBe(false);
+    expect(text).toContain('created: ?');
+    expect(text).not.toContain('Internal error');
+  });
+
+  it('degrades to a plain result, not `malformed`, when GlitchTip answers with no body', async () => {
+    const mock = new MockGlitchTip().on(
+      'GET',
+      `${API}/teams/acme/core/`,
+      new Response(null, { status: 204 }),
+    );
+    const { text, isError } = await call(mock, 'get_team', { organization: 'acme', team: 'core' });
+    expect(isError).toBe(false);
+    expect(text).toBe('Team core in acme: GlitchTip returned no body (?).');
+  });
+
   it('is a malformed tool error naming get_team when projects is not an array', async () => {
     const mock = new MockGlitchTip().json('GET', `${API}/teams/acme/core/`, {
       ...malformedTeam,

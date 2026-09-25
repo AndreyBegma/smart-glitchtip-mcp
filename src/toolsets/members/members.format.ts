@@ -30,7 +30,7 @@ export function memberListView(page: Page<Member>, org: string, team: string | u
       }
       const body = table(members, [
         { header: 'id', value: (m) => m.id },
-        { header: 'role', value: (m) => m.role },
+        { header: 'role', value: (m) => m.role ?? '?' },
         { header: 'pending', value: (m) => (m.pending ? 'invited' : '-') },
         { header: 'owner', value: (m) => (m.isOwner ? 'owner' : '-') },
         { header: 'joined', value: (m) => day(m.dateCreated) },
@@ -56,7 +56,7 @@ export function memberDetailView(member: MemberDetail): View {
         ['id', member.id],
         ['email', emailFence(member.email)],
         ['name', nameFence(member.user?.name)],
-        ['role', member.role],
+        ['role', member.role ?? '?'],
         ['pending', member.pending],
         ['owner', member.isOwner],
         ['joined', day(member.dateCreated)],
@@ -135,8 +135,8 @@ interface MemberProjection {
 function memberProjection(m: Member | MemberDetail): MemberProjection {
   return {
     id: m.id,
-    email: m.email,
-    name: m.user?.name ?? null,
+    email: flatten(m.email ?? ''),
+    name: m.user?.name ? flatten(m.user.name) : null,
     role: m.role,
     pending: m.pending,
     isOwner: m.isOwner,
@@ -160,10 +160,19 @@ function countedList(items: readonly string[]): string {
   return items.length === 0 ? '0' : `${items.length} (${items.join(', ')})`;
 }
 
+/**
+ * C0/DEL/C1 controls, zero-width and bidi-control characters, and the BOM —
+ * none of them are `\s` in JS, and a name or email can carry any of them.
+ * Collapsed to a space before the whitespace collapse below, so a hostile
+ * value cannot hide a fake tag boundary or reorder the fenced text visually.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this refuses.
+const CONTROL_AND_INVISIBLE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁩﻿]/g;
+
 function flatten(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+  return text.replace(CONTROL_AND_INVISIBLE, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function day(iso: string): string {
-  return iso.slice(0, 10);
+function day(iso: string | null | undefined): string {
+  return iso ? iso.slice(0, 10) : '?';
 }

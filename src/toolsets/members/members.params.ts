@@ -26,9 +26,12 @@ export const inviteTeamsParam = z
   .min(1)
   .max(20)
   .optional()
-  .refine((teams) => teams === undefined || new Set(teams).size === teams.length, {
-    message: 'teams must not contain duplicate slugs.',
-  })
+  .refine(
+    (teams) =>
+      teams === undefined || new Set(teams.map((slug) => slug.toLowerCase())).size === teams.length,
+    // GlitchTip slugs are lowercase, so "Core" and "core" name the same team.
+    { message: 'teams must not contain duplicate slugs.' },
+  )
   .describe(
     'Team slugs to add the invitee to (1–20). Unknown slugs are dropped by GlitchTip ' +
       'without error; the result reports what was requested, not what was applied.',
