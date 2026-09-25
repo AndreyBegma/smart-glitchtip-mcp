@@ -31,7 +31,9 @@ describe('list_monitors', () => {
     const { text, isError } = await call(mock, 'list_monitors', { organization: 'acme' });
     expect(isError).toBe(false);
     expect(text).toContain('API health');
-    expect(text).toContain('no checks yet');
+    // checks is missing entirely (not an empty array): "unavailable", distinct from a monitor
+    // that legitimately has no checks yet.
+    expect(text).toContain('unavailable');
     expect(text).not.toContain('Internal error');
   });
 
@@ -44,6 +46,31 @@ describe('list_monitors', () => {
     expect(text).toMatch(MALFORMED);
     expect(text).toContain('list_monitors');
     expect(text).not.toContain('Internal error');
+  });
+
+  it('degrades an unknown monitorType and an unparsable lastChange to a safe cell plus a fenced note', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/monitors/`, [
+      { ...malformedMonitor, monitorType: 'Bogus', lastChange: 'not-a-date' },
+    ]);
+    const { text, isError } = await call(mock, 'list_monitors', { organization: 'acme' });
+    expect(isError).toBe(false);
+    expect(text).not.toContain('Internal error');
+    expect(text).toContain(
+      '<untrusted source="glitchtip-config" field="monitorType">Bogus</untrusted>',
+    );
+    expect(text).toContain(
+      '<untrusted source="glitchtip-config" field="lastChange">not-a-date</untrusted>',
+    );
+  });
+
+  it('renders isUp as pending, and id as "?", when either is the wrong type', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/monitors/`, [
+      { ...malformedMonitor, id: 'not-a-number', isUp: 'true' },
+    ]);
+    const { text, isError } = await call(mock, 'list_monitors', { organization: 'acme' });
+    expect(isError).toBe(false);
+    expect(text).toContain('pending');
+    expect(text).not.toContain('not-a-number');
   });
 });
 
@@ -105,6 +132,20 @@ describe('list_monitor_checks', () => {
     expect(isError).toBe(true);
     expect(text).toMatch(
       /^GlitchTip answered list monitor checks with something other than a list/,
+    );
+  });
+
+  it('degrades an unparsable startCheck to a safe cell plus a fenced note, without throwing', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/monitors/1/checks/`, [
+      { ...malformedCheck, startCheck: 'not-a-date' },
+    ]);
+    const { text, isError } = await call(mock, 'list_monitor_checks', {
+      organization: 'acme',
+      monitor_id: 1,
+    });
+    expect(isError).toBe(false);
+    expect(text).toContain(
+      '<untrusted source="glitchtip-config" field="check.time">not-a-date</untrusted>',
     );
   });
 });

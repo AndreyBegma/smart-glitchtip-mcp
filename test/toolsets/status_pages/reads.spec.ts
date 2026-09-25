@@ -69,12 +69,47 @@ describe('list_status_pages', () => {
     expect(mock.requests[0].url.pathname).toBe('/api/0/organizations/acme/status-pages/');
   });
 
-  it('omits the URL when no monitor on the page matches the requested org', async () => {
+  it('omits the URL and marks the organization unknown when no monitor on the page matches', async () => {
     const mock = new MockGlitchTip()
       .json('GET', `${API}/organizations/acme/status-pages/`, [PAGE])
       .json('GET', `${API}/organizations/acme/`, { id: '99', name: 'Acme' });
     const { text } = await call(mock, 'list_status_pages', { organization: 'acme' });
     expect(text).not.toContain('url:');
+    expect(text).toContain('organization: unknown');
+  });
+
+  it('degrades to no URL, without failing the list, when the organization lookup itself fails', async () => {
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/organizations/acme/status-pages/`, [PAGE])
+      .json('GET', `${API}/organizations/acme/`, {}, { status: 500 });
+    const { text, isError } = await call(mock, 'list_status_pages', { organization: 'acme' });
+    expect(isError).toBe(false);
+    expect(text).not.toContain('url:');
+    expect(text).toContain('organization: unknown');
+    expect(text).toContain('Public status');
+  });
+
+  it('fences an unsafe slug and never builds a URL from it', async () => {
+    const unsafe = { ...PAGE, slug: '../../evil' };
+    const mock = new MockGlitchTip()
+      .json('GET', `${API}/organizations/acme/status-pages/`, [unsafe])
+      .json('GET', `${API}/organizations/acme/`, { id: '42', name: 'Acme' });
+    const { text } = await call(mock, 'list_status_pages', { organization: 'acme' });
+    expect(text).toContain(
+      '<untrusted source="glitchtip-config" field="slug">../../evil</untrusted>',
+    );
+    expect(text).not.toContain('url:');
+  });
+
+  it('skips a null entry in monitors in the text path, like the json path already does', async () => {
+    const withNullMonitor = { ...PAGE, monitors: [null, PAGE.monitors[0]] };
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/status-pages/`, [
+      withNullMonitor,
+    ]);
+    const { text, isError } = await call(mock, 'list_status_pages', { organization: 'acme' });
+    expect(isError).toBe(false);
+    expect(text).toContain('API');
+    expect(text).not.toContain('Internal error');
   });
 
   it('does not look up the organization id when no page has monitors', async () => {

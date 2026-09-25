@@ -42,6 +42,23 @@ only when the caller passes `include_heartbeat_url: true` on `get_monitor` or
 shows the full URL — use `get_monitor` for that. `list_monitors` never shows
 heartbeat information at all, masked or otherwise.
 
+**An operator who enables writes here (`GLITCHTIP_READ_ONLY=false` with
+`monitors` in `GLITCHTIP_TOOLSETS`) is giving an agent a way to make the
+GlitchTip instance itself send requests to a target of the agent's choosing,
+on a schedule, and read back reachability, status codes and response times.**
+GlitchTip normally refuses a monitor whose target resolves to a private or
+internal address; if the instance sets
+`GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS`, that refusal is gone, and
+`create_monitor`/`update_monitor` become a slow, agent-driven port scanner of
+whatever network the GlitchTip instance itself can reach — including targets
+an agent talking only to the public internet could never otherwise probe.
+This server does not contact a monitor's URL itself and cannot see or change
+that instance setting; the only bounds it can offer are read-only mode
+(default), the toolset being off by default, and this warning. **Before
+setting `GLITCHTIP_READ_ONLY=false` for `monitors` on an instance with
+`GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS` set, an operator should treat every
+agent with access as if it could reach every host that instance can reach.**
+
 **Every monitor name, url and expected-body value is untrusted data (D-18).**
 They are set by any member of the organization, not an operator constant, and
 a check's response is a third-party host's own behaviour. Every tool that
@@ -56,12 +73,23 @@ warning is the *last* sentence.
 **A monitor's `isUp` is `null` until its first check** — rendered `pending`,
 never `down`.
 
-**Malformed responses degrade, they don't crash.** A missing optional part
-(no `checks`, an unrecognised `monitorType`, an unrecognised check `reason`)
-degrades inside the formatter — `checks: unavailable`, the raw value printed,
-`reason <n>` — never "Internal error". A response of the wrong shape
-entirely (a list answering with an object, a field whose type breaks a view
-mid-render) is the foundation's `malformed` tool error naming the tool.
+**Malformed responses degrade, they don't crash — and a typed field is
+rendered plain only when it actually has the shape it should.** `checks`
+missing entirely renders `unavailable`, distinct from a monitor that
+legitimately has none yet (`no checks yet` / `checks (last 0): none
+recorded yet`). An id or a number (`interval`, `confirmationThreshold`,
+`expectedStatus`, a check's `responseTimeMs`) renders plain only when it is
+actually a number, else `?`. A timestamp (`lastChange`, `created`, a check's
+time) renders plain only when it parses as a date-time, else fenced as
+untrusted text — never trusted as a bare timestamp. `monitorType` renders
+plain only when it is one of GlitchTip's known types, else fenced. In
+`list_monitors` and `list_monitor_checks`, where these values sit in a table
+column, the column itself always shows the safe placeholder and the fenced
+raw value is appended to that row's trailer instead — a table cell's
+80-character cut is not fence-aware, so a tag is never left to embed there.
+A response of the wrong shape entirely (a list answering with an object, a
+field whose type breaks a view mid-render) is the foundation's `malformed`
+tool error naming the tool.
 
 | Tool | GlitchTip endpoint | readOnly | destructive | idempotent | Read-only mode |
 |---|---|---|---|---|---|
@@ -85,10 +113,12 @@ pending), type, target and recent uptime.
 | `format` | `"text"` \| `"json"` | `text` |
 
 Text output is a table (`id`, `monitorType`, `state`, `lastChange`,
-`interval`, `project`, `uptime`) with the fenced name and url appended to
-each row; url is cut to 120 characters and reads `—` for a `Heartbeat`
-monitor. `uptime` is the ratio of up checks over the checks GlitchTip embeds
-(the 60 most recent). Empty: `No monitors in <org>.`
+`interval`, `uptime`) with the fenced name, url and (when present) project
+appended to each row; url is cut to 120 characters and reads `—` for a
+`Heartbeat` monitor. `uptime` is the ratio of up checks over the checks
+GlitchTip embeds (the 60 most recent), shown as `up 58/60 (last 60
+checks)`, or `unavailable`/`no checks yet` (see "Malformed responses"
+above). Empty: `No monitors in <org>.`
 
 ## `get_monitor`
 
@@ -104,10 +134,16 @@ its recent checks.
 
 Adds `expectedStatus`, `expectedBody` (fenced), `timeout` (`default (20 s)`
 when GlitchTip sent none), `confirmationThreshold`, `environment`, `created`
-to `list_monitors`' fields, plus a check summary: the last check (time,
-up/down, reason), the average and max response time in ms across the
-embedded checks, and up to the last 5 up/down transitions. Ends with `Full
-history: list_monitor_checks(monitor_id).`
+to `list_monitors`' fields (`project` and `environment` are both fenced —
+`project` as `glitchtip-config`, `environment` as `glitchtip-event`, since a
+GlitchTip `Environment` row is created lazily from whatever an ingested
+event's tag names, making its name exactly as trustworthy as event content),
+plus a check summary: the last check (time, up/down, reason), the average
+and max response time in ms across the embedded checks, and up to the last 5
+up/down transitions. Ends with `Full history: list_monitor_checks(monitor_id).`
+The heartbeat id is masked to its last 4 characters — or to a bare ellipsis
+with none of them, for an id of 8 characters or fewer, where 4 real
+characters would give away most of it.
 
 ## `list_monitor_checks`
 
@@ -140,7 +176,7 @@ the given interval — this server never contacts the target itself.
 | `organization` | slug | the default organization |
 | `name` | string, 1–200 chars | required |
 | `monitor_type` | `"Ping"` \| `"GET"` \| `"POST"` \| `"TCP Port"` \| `"SSL"` \| `"Heartbeat"` | required (no silent default) |
-| `url` | string, ≤ 2000 chars (`host:port` for `"TCP Port"`) | required for every type except `Heartbeat` |
+| `url` | string, trimmed, 1–2000 chars (`host:port` for `"TCP Port"`) | required for every type except `Heartbeat` |
 | `expected_status` | integer 100–599 | required for `GET`/`POST`; none otherwise |
 | `expected_body` | string, ≤ 2000 chars | `""` |
 | `interval` | integer 1–86400 (seconds) | 60 |
@@ -150,12 +186,17 @@ the given interval — this server never contacts the target itself.
 | `project` | project slug | none |
 | `format` | `"text"` \| `"json"` | `text` |
 
-The type rules above are checked before any request. `project`, if given, is
-resolved to its id with `GET /api/0/projects/{org}/{project}/` first; a
-missing project is a 404 tool error. GlitchTip additionally refuses
-private/internal targets unless the instance sets
-`GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS`; its 4xx message is passed through.
-Output is the new monitor in `get_monitor` shape.
+The type rules above are checked before any request, along with `url`'s
+shape for the chosen `monitor_type`: `GET`/`POST` need `http://` or
+`https://`; `"TCP Port"` needs `host:port`; `SSL` needs `https://` or a bare
+host (no scheme, no path); every type refuses `javascript:`, `data:` and
+`file:` outright, and an empty or whitespace-only value after trimming.
+`project`, if given, is resolved to its id with
+`GET /api/0/projects/{org}/{project}/` first; a missing project is a 404
+tool error. GlitchTip additionally refuses private/internal targets unless
+the instance sets `GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS` (see the warning
+above); its 4xx message is passed through. Output is the new monitor in
+`get_monitor` shape.
 
 ## `update_monitor`
 
@@ -164,6 +205,17 @@ Change a monitor's settings. GlitchTip's `PUT` is full-replace
 first and sends the complete settings back — an omitted field is never
 dropped, and it is always re-sent with its current value (a `null`
 `expectedBody` read back is sent as `""`).
+
+**A read-then-write never fills a gap it finds.** Before merging, the `GET`
+response is checked field by field: `monitorType` must be one of GlitchTip's
+known types, `interval` and `confirmationThreshold` must be integers,
+`projectID`/`timeout`/`expectedStatus` must each be present as their typed
+value or `null`, and `expectedBody` must be present as a string or `null`.
+The first field that fails refuses the update — `Not updated: GlitchTip's
+monitor response is incomplete (<field>).` — before any merge is computed,
+so a short or malformed `GET` response can never silently reset
+`monitorType` to `Ping`, detach the project, or drop `interval` back to its
+default.
 
 | Input | Type | Default |
 |---|---|---|
@@ -180,12 +232,16 @@ dropped, and it is always re-sent with its current value (a `null`
 | `project` | project slug or `null` (`null` detaches) | — |
 | `format` | `"text"` \| `"json"` | `text` |
 
-The type rules of `create_monitor` are re-checked on the merged body: if the
-merged type is not `Heartbeat` and there is no url to re-send, or the merged
-type is `GET`/`POST` and there is no `expected_status` to re-send, the tool
-refuses after the `GET` but before the `PUT`. Output is the updated monitor
-as `PUT` returns it (a re-read); the heartbeat line is always masked — use
-`get_monitor` with `include_heartbeat_url: true` for the URL.
+The type and url-shape rules of `create_monitor` are re-checked on the
+merged body: if the merged type is not `Heartbeat` and there is no url to
+re-send (or its shape no longer fits the merged type), or the merged type is
+`GET`/`POST` and there is no `expected_status` to re-send, the tool refuses
+after the `GET` but before the `PUT`. Output is the updated monitor as `PUT`
+returns it (a re-read); the heartbeat line is always masked — use
+`get_monitor` with `include_heartbeat_url: true` for the URL. If the `PUT`
+itself fails, the current monitor's heartbeat endpoint id and url (read
+during the `GET`, before this tool knew the call would fail) are scrubbed
+from the error message and detail before either reaches the agent.
 
 ## `delete_monitor`
 

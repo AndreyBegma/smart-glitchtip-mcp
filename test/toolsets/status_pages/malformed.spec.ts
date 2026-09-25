@@ -34,6 +34,19 @@ describe('list_status_pages', () => {
     expect(text).not.toContain('Internal error');
   });
 
+  it('renders a monitor with a non-boolean isUp as pending, and a non-numeric id as "?"', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/status-pages/`, [
+      {
+        ...malformedStatusPage,
+        monitors: [{ id: 'not-a-number', name: 'API', isUp: 'true' }],
+      },
+    ]);
+    const { text, isError } = await call(mock, 'list_status_pages', { organization: 'acme' });
+    expect(isError).toBe(false);
+    expect(text).toContain('pending');
+    expect(text).not.toContain('not-a-number');
+  });
+
   it('is a malformed tool error naming list_status_pages when monitors is not an array', async () => {
     const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/status-pages/`, [
       { ...malformedStatusPage, monitors: 123 },

@@ -1,25 +1,29 @@
+import { flatten } from '../../format/sanitize';
 import { type Column, keyValues, table, withCursor } from '../../format/table';
 import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
 import type { Page } from '../../glitchtip/pagination';
+import { MONITOR_TYPES } from './monitors.params';
 
-// Views GlitchTip's monitor payloads down to the fields an agent uses (D-12). Name, url and
-// expectedBody are untrusted (D-18: "glitchtip-config" — set by an organization member, not an
-// operator constant): fenced with untrusted() in text output, and the whole json result wrapped in
-// one fence per tool (see each view's `untrusted`). Every field read here is guarded against a
-// malformed or partial GlitchTip response so a bad payload degrades the text, never throws
-// (BUG-20260925-006); `checks` missing or empty degrades to "checks: unavailable" rather than
-// throwing — only a field of the wrong type breaks a view, which ToolOutput turns into the
-// `malformed` tool error.
+// Views GlitchTip's monitor payloads down to the fields an agent uses (D-12). Name, url, project,
+// environment and expectedBody are untrusted (D-18: environment is "glitchtip-event" — an
+// Environment row is created lazily from whatever an event's tag names, so its name is exactly as
+// trustworthy as event content; everything else here is "glitchtip-config" — set by an
+// organization member, not an operator constant). Fenced with untrusted() in text output, and the
+// whole json result wrapped in one fence per tool (see each view's `untrusted`).
+//
+// A typed field (an id, a timestamp, a monitor type) is rendered plain only when it actually has
+// the shape GlitchTip's schema promises; a malformed or unexpected value degrades to a safe
+// placeholder (`?`) where it appears in a table cell — table()'s 80-character-per-cell cut is not
+// fence-aware, so an untrusted() tag is never embedded there — and the raw value is still shown,
+// fenced, in that row's trailer. `checks` missing entirely (a malformed response) renders
+// "unavailable", distinct from a monitor that legitimately has none yet; only a field of the wrong
+// type that makes a view throw becomes the foundation's `malformed` tool error (BUG-20260925-006).
 
 /** Caps a single untrusted field so a shared response-budget cut can't land mid-fence. */
 export const FIELD_CAP = 2000;
 const URL_LIST_CAP = 120;
 const STATE_CHANGE_LIMIT = 5;
-
-export function flatten(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
 
 export function capText(text: string, limit = FIELD_CAP): string {
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
@@ -56,7 +60,8 @@ export interface MonitorLike {
   readonly created: string;
   readonly endpointID?: string | null;
   readonly heartbeatEndpoint: string | null;
-  readonly checks: readonly CheckLike[];
+  /** Optional here although GlitchTip's schema requires it: a malformed response can omit it. */
+  readonly checks?: readonly CheckLike[];
 }
 
 /** [Confirmed: MonitorCheckReason in apps/uptime/constants.py]. */
@@ -74,28 +79,55 @@ function reasonText(reason: number | null | undefined): string {
   return REASONS[reason] ?? `reason ${reason}`;
 }
 
-/** `isUp` is null until the first check (spec: "rendered pending, not down"). */
-function stateText(isUp: boolean | null): 'up' | 'down' | 'pending' {
-  if (isUp === null) return 'pending';
-  return isUp ? 'up' : 'down';
+/** Strict on both states: anything that is not literally `true`/`false` is `pending`. */
+function stateText(isUp: boolean | null | undefined): 'up' | 'down' | 'pending' {
+  if (isUp === true) return 'up';
+  if (isUp === false) return 'down';
+  return 'pending';
 }
 
-function upRatioText(checks: readonly CheckLike[]): string {
+function idText(id: number | null | undefined): string {
+  return typeof id === 'number' ? String(id) : '?';
+}
+
+function numberCell(value: unknown, unit = ''): string {
+  return typeof value === 'number' ? `${value}${unit}` : '?';
+}
+
+function isKnownMonitorType(value: string): value is (typeof MONITOR_TYPES)[number] {
+  return (MONITOR_TYPES as readonly string[]).includes(value);
+}
+
+function isParseableTime(raw: string): boolean {
+  return !Number.isNaN(Date.parse(raw));
+}
+
+/**
+ * Plain when `raw` actually parses as a date-time; fenced (never trusted as
+ * a bare timestamp) otherwise. Safe to call anywhere the result lands in
+ * unbounded text (`keyValues`); a `table()` cell needs the cell/trailer
+ * split below instead, since its per-cell cut is not fence-aware.
+ */
+function timeText(raw: string, field: string): string {
+  return isParseableTime(raw)
+    ? raw
+    : untrusted(field, truncate(raw, FIELD_CAP), 'glitchtip-config');
+}
+
+function upRatioText(checks: readonly CheckLike[] | undefined): string {
+  if (checks === undefined) return 'unavailable';
   if (checks.length === 0) return 'no checks yet';
   const up = checks.filter((c) => c.isUp).length;
-  return `up ${up}/${checks.length}`;
+  return `up ${up}/${checks.length} (last ${checks.length} checks)`;
 }
 
 /**
  * `lastChange` is a pre-formatted string, not a typed date-time [Confirmed:
- * MonitorSchema.resolve_last_change]; an unparsable value is printed as is,
- * never dropped or thrown on.
+ * MonitorSchema.resolve_last_change]. Called only once `isParseableTime` has
+ * already confirmed `raw` parses.
  */
-function lastChangeText(raw: string | null): string {
-  if (!raw) return '-';
-  const then = Date.parse(raw);
-  if (Number.isNaN(then)) return raw;
-  return `${relativeAge(then)} (${raw})`;
+function lastChangeRelative(raw: string): string {
+  return `${relativeAge(Date.parse(raw))} (${raw})`;
 }
 
 function relativeAge(then: number, now = Date.now()): string {
@@ -114,6 +146,24 @@ function relativeAge(then: number, now = Date.now()): string {
   return 'just now';
 }
 
+/** Detail view (unbounded `keyValues` text): safe to fence an unparsable value inline. */
+function lastChangeDetailText(raw: string | null): string {
+  if (!raw) return '-';
+  return isParseableTime(raw) ? lastChangeRelative(raw) : timeText(raw, 'lastChange');
+}
+
+/** List view (a `table()` cell): a safe placeholder only — the raw value goes in the trailer. */
+function lastChangeCell(raw: string | null): string {
+  if (!raw) return '-';
+  return isParseableTime(raw) ? lastChangeRelative(raw) : '?';
+}
+
+function lastChangeNote(raw: string | null): string | undefined {
+  return raw && !isParseableTime(raw)
+    ? untrusted('lastChange', truncate(raw, FIELD_CAP), 'glitchtip-config')
+    : undefined;
+}
+
 function timeoutText(timeout: number | null | undefined): string {
   return timeout != null ? `${timeout} s` : 'default (20 s)';
 }
@@ -123,9 +173,9 @@ function urlText(monitor: MonitorLike, limit: number): string {
   return untrusted('url', truncate(monitor.url ?? '', limit), 'glitchtip-config');
 }
 
-/** Last 4 characters of an id, masked (spec: heartbeat URL/id exposure). */
+/** Last 4 characters of an id, masked — nothing at all when that would reveal most of a short id. */
 function maskId(id: string): string {
-  return `…${id.slice(-4)}`;
+  return id.length <= 8 ? '…' : `…${id.slice(-4)}`;
 }
 
 function heartbeatTextLine(monitor: MonitorLike, includeUrl: boolean): string | undefined {
@@ -177,23 +227,24 @@ function stateChanges(checks: readonly CheckLike[], limit: number): CheckLike[] 
   return changes;
 }
 
-function checkSummaryText(checks: readonly CheckLike[]): string {
-  if (checks.length === 0) return 'checks: unavailable';
+function checkSummaryText(checks: readonly CheckLike[] | undefined): string {
+  if (checks === undefined) return 'checks: unavailable';
+  if (checks.length === 0) return 'checks (last 0): none recorded yet';
   const last = checks[0];
-  const lastLine = `last check: ${last.startCheck} ${stateText(last.isUp)} (${reasonText(last.reason)})`;
+  const lastLine = `last check: ${timeText(last.startCheck, 'check.time')} ${stateText(last.isUp)} (${reasonText(last.reason)})`;
   const times = responseTimes(checks);
   const timesLine = times.length
     ? `response time: avg ${Math.round(average(times))} ms, max ${Math.max(...times)} ms`
     : 'response time: unavailable';
   const changes = stateChanges(checks, STATE_CHANGE_LIMIT);
   const changesLine = changes.length
-    ? `last state changes:\n${changes.map((c) => `  ${c.startCheck} -> ${stateText(c.isUp)}`).join('\n')}`
+    ? `last state changes:\n${changes.map((c) => `  ${timeText(c.startCheck, 'check.time')} -> ${stateText(c.isUp)}`).join('\n')}`
     : 'last state changes: none recorded';
-  return [lastLine, timesLine, changesLine].join('\n');
+  return [`checks (last ${checks.length}):`, lastLine, timesLine, changesLine].join('\n');
 }
 
-function checkSummaryJson(checks: readonly CheckLike[]): Record<string, unknown> {
-  if (checks.length === 0) {
+function checkSummaryJson(checks: readonly CheckLike[] | undefined): Record<string, unknown> {
+  if (!checks || checks.length === 0) {
     return { lastCheck: null, avgResponseTimeMs: null, maxResponseTimeMs: null, stateChanges: [] };
   }
   const last = checks[0];
@@ -209,7 +260,17 @@ function checkSummaryJson(checks: readonly CheckLike[]): Record<string, unknown>
   };
 }
 
-/** A table plus one untrusted-fenced value appended to each rendered row, at the end. */
+function uptimeJson(
+  checks: readonly CheckLike[] | undefined,
+): { up: number; total: number } | null {
+  if (!checks || checks.length === 0) return null;
+  return { up: checks.filter((c) => c.isUp).length, total: checks.length };
+}
+
+/**
+ * A table plus one untrusted-fenced trailer appended to each rendered row —
+ * omitted (no extra separator) when a row's trailer is empty.
+ */
 function withFencedTrailer<Row>(
   rows: readonly Row[],
   columns: readonly Column<Row>[],
@@ -217,8 +278,28 @@ function withFencedTrailer<Row>(
 ): string {
   const body = table(rows, columns);
   const [header, ...lines] = body.split('\n');
-  const withTrailers = lines.map((line, i) => `${line}  ${trailer(rows[i])}`);
+  const withTrailers = lines.map((line, i) => {
+    const note = trailer(rows[i]);
+    return note ? `${line}  ${note}` : line;
+  });
   return [header, ...withTrailers].join('\n');
+}
+
+function monitorRowTrailer(m: MonitorLike): string {
+  const parts = [
+    untrusted('name', truncate(m.name, FIELD_CAP), 'glitchtip-config'),
+    urlText(m, URL_LIST_CAP),
+  ];
+  if (m.projectName) {
+    parts.push(untrusted('project', truncate(m.projectName, FIELD_CAP), 'glitchtip-config'));
+  }
+  const monitorTypeNote = isKnownMonitorType(m.monitorType)
+    ? undefined
+    : untrusted('monitorType', truncate(m.monitorType, FIELD_CAP), 'glitchtip-config');
+  if (monitorTypeNote) parts.push(monitorTypeNote);
+  const lastChangeNoteText = lastChangeNote(m.lastChange);
+  if (lastChangeNoteText) parts.push(lastChangeNoteText);
+  return parts.join('  ');
 }
 
 export function monitorListView(page: Page<MonitorLike>, org: string): View {
@@ -230,22 +311,23 @@ export function monitorListView(page: Page<MonitorLike>, org: string): View {
       const body = withFencedTrailer(
         monitors,
         [
-          { header: 'id', value: (m) => m.id ?? '?' },
-          { header: 'monitorType', value: (m) => m.monitorType },
+          { header: 'id', value: (m) => idText(m.id) },
+          {
+            header: 'monitorType',
+            value: (m) => (isKnownMonitorType(m.monitorType) ? m.monitorType : '?'),
+          },
           { header: 'state', value: (m) => stateText(m.isUp) },
-          { header: 'lastChange', value: (m) => lastChangeText(m.lastChange) },
-          { header: 'interval', value: (m) => `${m.interval}s` },
-          { header: 'project', value: (m) => m.projectName ?? '-' },
-          { header: 'uptime', value: (m) => upRatioText(m.checks ?? []) },
+          { header: 'lastChange', value: (m) => lastChangeCell(m.lastChange) },
+          { header: 'interval', value: (m) => numberCell(m.interval, 's') },
+          { header: 'uptime', value: (m) => upRatioText(m.checks) },
         ],
-        (m) =>
-          `${untrusted('name', truncate(m.name, FIELD_CAP), 'glitchtip-config')}  ${urlText(m, URL_LIST_CAP)}`,
+        monitorRowTrailer,
       );
       return withCursor(body, page.nextCursor);
     },
     json: () => ({
       monitors: monitors.map((m) => ({
-        id: m.id ?? null,
+        id: typeof m.id === 'number' ? m.id : null,
         name: m.name,
         monitorType: m.monitorType,
         state: stateText(m.isUp),
@@ -253,38 +335,55 @@ export function monitorListView(page: Page<MonitorLike>, org: string): View {
         url: m.monitorType === 'Heartbeat' ? null : (m.url ?? null),
         interval: m.interval,
         project: m.projectName ?? null,
-        uptime: uptimeJson(m.checks ?? []),
+        uptime: uptimeJson(m.checks),
       })),
       nextCursor: page.nextCursor ?? null,
     }),
   };
 }
 
-function uptimeJson(checks: readonly CheckLike[]): { up: number; total: number } | null {
-  if (checks.length === 0) return null;
-  return { up: checks.filter((c) => c.isUp).length, total: checks.length };
-}
-
 export function monitorDetailView(
   monitor: MonitorLike,
   options: { includeHeartbeatUrl: boolean },
 ): View {
-  const checks = monitor.checks ?? [];
+  const checks = monitor.checks;
   return {
     untrusted: { field: 'monitor', source: 'glitchtip-config' },
     text: () => {
       const header = keyValues([
-        ['id', monitor.id ?? '?'],
+        ['id', idText(monitor.id)],
         ['name', untrusted('name', truncate(monitor.name, FIELD_CAP), 'glitchtip-config')],
-        ['monitorType', monitor.monitorType],
+        [
+          'monitorType',
+          isKnownMonitorType(monitor.monitorType)
+            ? monitor.monitorType
+            : untrusted(
+                'monitorType',
+                truncate(monitor.monitorType, FIELD_CAP),
+                'glitchtip-config',
+              ),
+        ],
         ['state', stateText(monitor.isUp)],
-        ['lastChange', lastChangeText(monitor.lastChange)],
+        ['lastChange', lastChangeDetailText(monitor.lastChange)],
         ['url', urlText(monitor, FIELD_CAP)],
-        ['interval', `${monitor.interval}s`],
-        ['project', monitor.projectName ?? undefined],
-        ['environment', monitor.envName ?? undefined],
+        ['interval', numberCell(monitor.interval, 's')],
+        [
+          'project',
+          monitor.projectName
+            ? untrusted('project', truncate(monitor.projectName, FIELD_CAP), 'glitchtip-config')
+            : undefined,
+        ],
+        [
+          'environment',
+          monitor.envName
+            ? untrusted('environment', truncate(monitor.envName, FIELD_CAP), 'glitchtip-event')
+            : undefined,
+        ],
         ['uptime', upRatioText(checks)],
-        ['expectedStatus', monitor.expectedStatus ?? undefined],
+        [
+          'expectedStatus',
+          typeof monitor.expectedStatus === 'number' ? monitor.expectedStatus : undefined,
+        ],
         [
           'expectedBody',
           monitor.expectedBody
@@ -296,8 +395,8 @@ export function monitorDetailView(
             : undefined,
         ],
         ['timeout', timeoutText(monitor.timeout)],
-        ['confirmationThreshold', monitor.confirmationThreshold],
-        ['created', monitor.created],
+        ['confirmationThreshold', numberCell(monitor.confirmationThreshold)],
+        ['created', timeText(monitor.created, 'created')],
       ]);
       const heartbeat = heartbeatTextLine(monitor, options.includeHeartbeatUrl);
       const parts = [header];
@@ -307,7 +406,7 @@ export function monitorDetailView(
       return parts.join('\n');
     },
     json: () => ({
-      id: monitor.id ?? null,
+      id: typeof monitor.id === 'number' ? monitor.id : null,
       name: monitor.name,
       monitorType: monitor.monitorType,
       state: stateText(monitor.isUp),
@@ -341,12 +440,16 @@ export function monitorChecksView(
           ? `No state changes recorded for monitor ${monitorId}.`
           : `No checks recorded for monitor ${monitorId}.`;
       }
-      const body = table(checks, [
-        { header: 'time', value: (c) => c.startCheck },
-        { header: 'state', value: (c) => stateText(c.isUp) },
-        { header: 'reason', value: (c) => reasonText(c.reason) },
-        { header: 'responseTimeMs', value: (c) => c.responseTime ?? '-' },
-      ]);
+      const body = withFencedTrailer(
+        checks,
+        [
+          { header: 'time', value: (c) => (isParseableTime(c.startCheck) ? c.startCheck : '?') },
+          { header: 'state', value: (c) => stateText(c.isUp) },
+          { header: 'reason', value: (c) => reasonText(c.reason) },
+          { header: 'responseTimeMs', value: (c) => numberCell(c.responseTime) },
+        ],
+        (c) => (isParseableTime(c.startCheck) ? '' : timeText(c.startCheck, 'check.time')),
+      );
       return withCursor(body, page.nextCursor);
     },
     json: () => ({
@@ -355,7 +458,7 @@ export function monitorChecksView(
         startCheck: c.startCheck,
         up: c.isUp,
         reason: reasonText(c.reason),
-        responseTimeMs: c.responseTime ?? null,
+        responseTimeMs: typeof c.responseTime === 'number' ? c.responseTime : null,
       })),
       nextCursor: page.nextCursor ?? null,
     }),

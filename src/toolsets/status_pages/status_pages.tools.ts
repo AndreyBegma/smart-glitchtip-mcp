@@ -63,7 +63,9 @@ export class StatusPagesTools {
         }),
       ),
     );
-    const orgId = hasAnyMonitor(page.items) ? await lookupOrgId(glitchtip, org) : undefined;
+    const orgId = hasAnyMonitor(page.items)
+      ? await lookupOrgIdOrUndefined(glitchtip, org)
+      : undefined;
     return this.output.render(
       args.format,
       statusPageListView(page, glitchtip.instance.url, org, orgId),
@@ -95,4 +97,21 @@ async function lookupOrgId(
   );
   const numeric = Number(detail.id);
   return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+/**
+ * This lookup is only ever used to decide whether a page's public URL can be
+ * shown — never the reason `list_status_pages` itself fails. A permission
+ * gap, a transient failure, or any other error here degrades to "the
+ * organization could not be attributed", never an error result.
+ */
+async function lookupOrgIdOrUndefined(
+  glitchtip: GlitchTipConnection,
+  org: string,
+): Promise<number | undefined> {
+  try {
+    return await lookupOrgId(glitchtip, org);
+  } catch {
+    return undefined;
+  }
 }

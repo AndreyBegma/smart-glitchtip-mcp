@@ -163,7 +163,10 @@ describe('get_monitor', () => {
     expect(text).toContain('interval: 60s');
     expect(text).toContain('timeout: default (20 s)');
     expect(text).toContain('confirmationThreshold: 1');
-    expect(text).toContain('environment: production');
+    expect(text).toContain(
+      '<untrusted source="glitchtip-event" field="environment">production</untrusted>',
+    );
+    expect(text).toContain('<untrusted source="glitchtip-config" field="project">web</untrusted>');
     expect(text).toContain('last check: 2026-01-01T00:05:00Z up (unknown)');
     expect(text).toContain('response time: avg 100 ms, max 120 ms');
     expect(text).toContain('last state changes:');
@@ -181,6 +184,16 @@ describe('get_monitor', () => {
     expect(text).toContain('heartbeat endpoint: configured (id …a1b2)');
     expect(text).not.toContain(HEARTBEAT_MONITOR.endpointID);
     expect(text).not.toContain(HEARTBEAT_MONITOR.heartbeatEndpoint);
+  });
+
+  it('masks a short heartbeat id (8 chars or fewer) down to an ellipsis, not 4 real characters', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/monitors/2/`, {
+      ...HEARTBEAT_MONITOR,
+      endpointID: 'ab12cd34',
+    });
+    const { text } = await call(mock, 'get_monitor', { organization: 'acme', monitor_id: 2 });
+    expect(text).toContain('heartbeat endpoint: configured (id …)');
+    expect(text).not.toContain('cd34');
   });
 
   it('shows the full heartbeat id and url with include_heartbeat_url, and the warning sentence', async () => {
