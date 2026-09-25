@@ -15,7 +15,7 @@ export function issueCommentsView(issueId: number, page: Page<Comment>): View {
       if (page.items.length === 0) return `No comments on issue ${issueId}.`;
       const blocks = page.items.map((c) => {
         const email = c.user?.email ?? 'unknown';
-        const text = untrusted('comment.text', capText(commentText(c)));
+        const text = untrusted('comment.text', capText(flatten(commentText(c))));
         return `[${c.id ?? '-'}] ${email} — ${c.dateCreated}\n${text}`;
       });
       return withCursor(blocks.join('\n\n'), page.nextCursor);

@@ -244,6 +244,25 @@ describe('merge_issues', () => {
     expect(text).toBe('Merged 5, 3 into 9 (PROJ-9).');
   });
 
+  it('reports the confirmed target as a number in json, not the string id GlitchTip returns', async () => {
+    const mock = new MockGlitchTip()
+      .json('PUT', `${API}/organizations/acme/issues/`, {})
+      .json('GET', `${API}/organizations/acme/issues/9/`, {
+        ...ISSUE_DETAIL,
+        id: '9',
+        shortId: 'PROJ-9',
+      });
+    const { text } = await call(mock, 'merge_issues', {
+      organization: 'acme',
+      issue_ids: [5, 9, 3],
+      confirm: '9',
+      format: 'json',
+    });
+    const parsed = JSON.parse(text);
+    expect(parsed.target).toBe(9);
+    expect(typeof parsed.target).toBe('number');
+  });
+
   it('falls back to the requested target id when the re-read cannot confirm it', async () => {
     const mock = new MockGlitchTip()
       .json('PUT', `${API}/organizations/acme/issues/`, {})

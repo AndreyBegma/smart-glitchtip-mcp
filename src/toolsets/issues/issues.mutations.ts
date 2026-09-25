@@ -303,7 +303,7 @@ export class IssuesMutations {
       : `Requested merge of ${merged.join(', ')} into ${target}; could not confirm the result.`;
     return this.output.render(
       args.format,
-      resultView(summary, { target: confirmed?.id ?? target, merged }),
+      resultView(summary, { target: confirmed ? Number(confirmed.id) : target, merged }),
     );
   }
 

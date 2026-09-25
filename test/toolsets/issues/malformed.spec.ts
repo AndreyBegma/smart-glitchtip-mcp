@@ -41,6 +41,16 @@ describe('list_issues', () => {
     expect(text).toContain('PROJ-1');
     expect(text).toContain('-'); // project column falls back to '-'
   });
+
+  it('falls back to "-" for a missing lastSeen instead of printing "undefined"', async () => {
+    const { lastSeen: _lastSeen, ...issueWithoutLastSeen } = malformedIssue;
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/issues/`, [
+      issueWithoutLastSeen,
+    ]);
+    const { text, isError } = await call(mock, 'list_issues', { organization: 'acme' });
+    expect(isError).toBe(false);
+    expect(text).not.toContain('undefined');
+  });
 });
 
 describe('get_issue', () => {

@@ -201,8 +201,11 @@ export function issueCommitsView(issueId: number, commits: Commit[]): View {
       return commits
         .map((c) => {
           const id = (c.id ?? '').slice(0, 7) || '-';
-          const author = untrusted('commit.author', flatten(c.authorName ?? c.authorEmail ?? '-'));
-          const message = untrusted('commit.message', flatten(firstLine(c.message ?? '')));
+          const author = untrusted(
+            'commit.author',
+            capText(flatten(c.authorName ?? c.authorEmail ?? '-')),
+          );
+          const message = untrusted('commit.message', capText(flatten(firstLine(c.message ?? ''))));
           return `${id}  ${author}\n${message}`;
         })
         .join('\n\n');
@@ -259,7 +262,8 @@ function relativeTime(iso: string, now = Date.now()): string {
   return 'just now';
 }
 
-function withRelative(iso: string, now?: number): string {
+function withRelative(iso: string | null | undefined, now?: number): string {
+  if (!iso) return '-';
   return `${relativeTime(iso, now)} (${iso})`;
 }
 

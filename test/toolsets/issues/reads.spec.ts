@@ -127,6 +127,18 @@ describe('list_issues', () => {
     expect(mock.requests[0].url.searchParams.get('end')).toBe('2026-02-01T00:00:00Z');
   });
 
+  it('also accepts a date-only ISO 8601 start/end', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/issues/`, []);
+    const { isError } = await call(mock, 'list_issues', {
+      organization: 'acme',
+      start: '2026-01-01',
+      end: '2026-02-01',
+    });
+    expect(isError).toBe(false);
+    expect(mock.requests[0].url.searchParams.get('start')).toBe('2026-01-01');
+    expect(mock.requests[0].url.searchParams.get('end')).toBe('2026-02-01');
+  });
+
   it('turns a 401 into an actionable tool error', async () => {
     const mock = new MockGlitchTip().json(
       'GET',
@@ -353,5 +365,20 @@ describe('list_issue_commits', () => {
     expect(text).toBe(
       'Issue 999 was not found in acme (it may be in another organization, or deleted).',
     );
+  });
+
+  it('caps an oversized author and message instead of returning them unbounded', async () => {
+    const mock = new MockGlitchTip().json('GET', `${API}/organizations/acme/issues/123/commits/`, [
+      { id: 'abcdef0123456789', message: 'y'.repeat(3000), authorName: 'z'.repeat(3000) },
+    ]);
+    const { text } = await call(mock, 'list_issue_commits', {
+      organization: 'acme',
+      issue_id: 123,
+    });
+    const author = /field="commit\.author">(z+…?)<\/untrusted>/.exec(text);
+    const message = /field="commit\.message">(y+…?)<\/untrusted>/.exec(text);
+    expect(author?.[1]?.length).toBeLessThanOrEqual(2000);
+    expect(message?.[1]?.length).toBeLessThanOrEqual(2000);
+    expect(text).toContain('…');
   });
 });

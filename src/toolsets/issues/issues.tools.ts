@@ -31,6 +31,9 @@ const projectParam = z
 
 const SORT_FIELDS = ['last_seen', 'first_seen', 'count', 'priority'] as const;
 
+/** Accepts both a date (2026-01-01) and a full date-time (2026-01-01T00:00:00Z). */
+const isoDateOrDateTime = z.union([z.string().date(), z.string().datetime({ offset: true })]);
+
 const listIssuesArgs = z.object({
   organization: organizationParam,
   project: projectParam,
@@ -42,16 +45,12 @@ const listIssuesArgs = z.object({
         'free text; terms combine with spaces. Pass "" for all statuses.',
     ),
   environment: z.array(z.string()).optional().describe('Filter to these environment names.'),
-  start: z
-    .string()
-    .datetime({ offset: true })
+  start: isoDateOrDateTime
     .optional()
-    .describe('ISO 8601 start of the first-seen window.'),
-  end: z
-    .string()
-    .datetime({ offset: true })
+    .describe('ISO 8601 start of the first-seen window (date or date-time).'),
+  end: isoDateOrDateTime
     .optional()
-    .describe('ISO 8601 end of the first-seen window.'),
+    .describe('ISO 8601 end of the first-seen window (date or date-time).'),
   sort: z.enum(SORT_FIELDS).default('last_seen').describe('Sort field; always newest/most first.'),
   limit: z.number().int().min(1).max(100).default(25).describe('Page size, 1–100 (default 25).'),
   cursor: cursorParam,
