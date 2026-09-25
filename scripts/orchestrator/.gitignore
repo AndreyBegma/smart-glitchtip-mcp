@@ -1,0 +1,5 @@
+# `claude_config.py` is imported by `pretrust_worktree.py` and
+# `accept_dangerous_mode.py`, so running either — or the suites that drive
+# them — leaves `__pycache__/` here. The rule lives beside the only Python in
+# the repository rather than in the root `.gitignore`.
+__pycache__/
