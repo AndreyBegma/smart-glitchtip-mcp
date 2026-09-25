@@ -244,6 +244,23 @@ describe('test_project_alert', () => {
     expect(mock.requests).toHaveLength(1);
   });
 
+  it('neutralises zero-width and bidi characters in a message (BUG-20260925-016)', async () => {
+    const hidden = String.fromCharCode(0x200b, 0x202e);
+    const mock = new MockGlitchTip()
+      .json('GET', ALERTS_URL, fixtureAlerts())
+      .json('POST', TEST_URL, [
+        { recipientType: `web${hidden}hook`, status: 'error', message: `a${hidden}b` },
+      ]);
+    const { text } = await call(mock, 'test_project_alert', {
+      organization: 'acme',
+      project: 'web',
+      alert_id: 7,
+    });
+    expect(text).toContain('web hook  error');
+    expect(text).toContain('field="test.message">a b</untrusted>');
+    expect(text).not.toMatch(/[​‮]/);
+  });
+
   it('renders a hostile message flattened and escaped inside the fence (acceptance 9)', async () => {
     const mock = new MockGlitchTip()
       .json('GET', ALERTS_URL, fixtureAlerts())

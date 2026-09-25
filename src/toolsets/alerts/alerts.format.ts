@@ -1,3 +1,4 @@
+import { flatten as sharedFlatten } from '../../format/sanitize';
 import { keyValues, withCursor } from '../../format/table';
 import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
@@ -20,10 +21,12 @@ const FIELD_CAP = 2000;
 const EMAIL_TARGET = "email to the project's team members";
 const UNPARSABLE = 'unparsable URL (masked)';
 
-/** CR, LF, other whitespace runs and control characters become one space. */
+/**
+ * The shared flatten (CR, LF, control and invisible characters → one space;
+ * BUG-20260925-016), capped so one field cannot take the whole budget.
+ */
 export function flatten(text: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this removes.
-  const flat = text.replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+  const flat = sharedFlatten(text);
   return flat.length > FIELD_CAP ? `${flat.slice(0, FIELD_CAP - 1)}…` : flat;
 }
 
