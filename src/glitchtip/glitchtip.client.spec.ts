@@ -98,6 +98,23 @@ describe('GlitchTipClient', () => {
     expect((await listOrgs(client)).items).toHaveLength(1);
   });
 
+  // BUG-20260925-018 acceptance 7: `noRetry` skips the 429/5xx retry and its `Retry-After`
+  // sleep for `page()` too, not only `raw()` — `timeoutMs` alone bounds one attempt.
+  it('noRetry: true skips the retry and the Retry-After sleep on page()', async () => {
+    const { mock, client, sleeps } = setup();
+    mock.json('GET', ORGS, {}, { status: 429, headers: { 'retry-after': '10' } });
+    const error = await failure(
+      client.page(
+        { name: 'list organizations', scopes: ['org:read'] },
+        (api) => api.GET('/api/0/organizations/', { params: { query: { limit: 50 } } }),
+        { noRetry: true },
+      ),
+    );
+    expect(error.kind).toBe('rate_limited');
+    expect(mock.requests).toHaveLength(1);
+    expect(sleeps).toEqual([]);
+  });
+
   it('honours Retry-After before retrying (fake timers)', async () => {
     vi.useFakeTimers();
     const mock = new MockGlitchTip();

@@ -18,6 +18,9 @@ describe('neutralise', () => {
     ['right-to-left override', '‮'],
     ['left-to-right isolate', '⁦'],
     ['pop directional isolate', '⁩'],
+    // BUG-20260925-018 acceptance 6: soft hyphen and the rest of \p{Cf}.
+    ['soft hyphen', '­'],
+    ['function application (\\p{Cf} sample)', '⁡'],
   ])('collapses a run of %s to one space', (_, char) => {
     expect(neutralise(`a${char}${char}b`, { keepNewlines: false })).toBe('a b');
     expect(neutralise(`a${char}${char}b`, { keepNewlines: true })).toBe('a b');

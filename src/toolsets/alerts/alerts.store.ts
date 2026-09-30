@@ -71,8 +71,10 @@ export async function readAlert(
 
 /**
  * PUTs the complete alert: `scalars` and every recipient in `recipients` —
- * GlitchTip deletes any recipient the body leaves out. Errors are scrubbed
- * of `secrets`.
+ * GlitchTip deletes any recipient the body leaves out. `secrets` is passed
+ * to the client as `extraSecrets` too (BUG-20260925-018 item 4), so a
+ * webhook/Zulip secret straddling the foundation's own detail cut is
+ * redacted there, before this toolset's own scrub runs as the second net.
  */
 export function writeAlert(
   client: GlitchTipClient,
@@ -92,6 +94,7 @@ export function writeAlert(
           },
           body: { ...scalars, alertRecipients: recipients },
         }),
+      { extraSecrets: secrets, keepShortExtraSecrets: true },
     ),
     { secrets, notFound: alertNotFoundMessage(alertId, project) },
   );

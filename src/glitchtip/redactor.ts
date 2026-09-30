@@ -29,8 +29,18 @@ interface Form {
 export class Redactor {
   readonly #forms: readonly Form[];
 
-  constructor(token: string | undefined, extraSecrets: readonly string[] = []) {
-    const secrets = extraSecrets.filter((s) => s.length >= SHORTEST_EXTRA_SECRET);
+  /**
+   * `keepShortExtras` lifts the length floor for `extraSecrets`, for a caller whose secrets are
+   * short by nature (an ntfy topic path `/s3cr3t`) and who has already chosen them with care.
+   */
+  constructor(
+    token: string | undefined,
+    extraSecrets: readonly string[] = [],
+    keepShortExtras = false,
+  ) {
+    const secrets = extraSecrets.filter(
+      (s) => s !== '' && (keepShortExtras || s.length >= SHORTEST_EXTRA_SECRET),
+    );
     if (token) secrets.push(token);
     this.#forms = [...new Set(secrets)].flatMap(formsOf);
   }

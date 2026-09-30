@@ -2,6 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { Ctx, Payload } from '@nestjs/microservices';
 import { type McpContext, Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
+import { checkTimeRange, dateTimeParam } from '../../format/time-range';
 import { ToolOutput } from '../../format/tool-output';
 import { GlitchTipError } from '../../glitchtip/glitchtip.errors';
 import { InstanceResolver } from '../../glitchtip/instance.resolver';
@@ -9,7 +10,6 @@ import { formatParam, organizationParam, READ_ONLY } from '../../mcp/tool-params
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
 import { organizationStatsView } from './stats.format';
 import { bucketParam, categoryParam, MAX_RANGE_DAYS, projectIdsParam } from './stats.params';
-import { checkTimeRange, dateTimeParam } from './time-range';
 
 /** Scope GlitchTip accepts for this route (`@has_permission`, v6.2.6) — org-level, not event. */
 export const STATS_READ_SCOPES = ['org:read', 'org:write', 'org:admin'] as const;

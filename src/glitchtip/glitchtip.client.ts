@@ -55,6 +55,20 @@ export interface CallOptions {
    * and from a raw call's body and headers.
    */
   readonly extraSecrets?: readonly string[];
+  /**
+   * Redacts `extraSecrets` of any length, not only 8+ characters. For a caller whose secrets
+   * are short by nature (an ntfy topic path); the default floor keeps a short common string
+   * from being scrubbed out of ordinary messages.
+   */
+  readonly keepShortExtraSecrets?: boolean;
+  /**
+   * Skips the 429/5xx retry and its `Retry-After` sleep for this call (D-13's retry policy
+   * still applies to every other call). For a caller that already bounds its own attempt
+   * with `timeoutMs`, a hidden retry can still run well past that budget — `timeoutMs`
+   * bounds one attempt, not the sleep between attempts (BUG-20260925-018 item 7: a single
+   * ingest verification poll could overrun `wait_seconds` by the retry delay, up to ~20 s).
+   */
+  readonly noRetry?: boolean;
 }
 
 export interface RawRequestOptions extends CallOptions {
@@ -124,7 +138,7 @@ export class GlitchTipClient {
   ): Promise<Page<T>> {
     const result = await this.perform(operation, request, options);
     if (!Array.isArray(result.data)) throw malformedListError(operation);
-    const redactor = this.instance.redactor(options?.extraSecrets);
+    const redactor = this.redactorFor(options);
     const headers = redactedHeaders(result.response.headers, redactor);
     return { items: result.data, nextCursor: parseNextCursor(headers.get('link')), headers };
   }
@@ -151,9 +165,9 @@ export class GlitchTipClient {
     const url = rawRequestUrl(this.instance.url, operation, path, options.query);
     assertCallerHeaders(options.headers ?? {});
     const request = buildRawRequest(url, verb, this.defaultHeaders(), options);
-    const redactor = this.instance.redactor(options.extraSecrets);
+    const redactor = this.redactorFor(options);
     try {
-      const response = await this.send(request, timeoutMs);
+      const response = await this.send(request, timeoutMs, options.noRetry ?? false);
       const text = redactor.redact(await response.text());
       return {
         status: response.status,
@@ -171,8 +185,12 @@ export class GlitchTipClient {
     options: CallOptions = {},
   ): Promise<ApiResult<T>> {
     const timeoutMs = this.timeoutFor(options);
-    const api = timeoutMs === this.options.timeoutMs ? this.api : this.createApi(timeoutMs);
-    const redactor = this.instance.redactor(options.extraSecrets);
+    const noRetry = options.noRetry ?? false;
+    const api =
+      timeoutMs === this.options.timeoutMs && !noRetry
+        ? this.api
+        : this.createApi(timeoutMs, noRetry);
+    const redactor = this.redactorFor(options);
     let result: ApiResult<T>;
     try {
       result = await request(api);
@@ -192,14 +210,18 @@ export class GlitchTipClient {
     throw redacted(mapped, redactor);
   }
 
+  private redactorFor(options: CallOptions | undefined): Redactor {
+    return this.instance.redactor(options?.extraSecrets, options?.keepShortExtraSecrets);
+  }
+
   /**
-   * The typed API, bound to one timeout. A per-call override gets its own
-   * instance, so concurrent calls never share a mutable timeout.
+   * The typed API, bound to one timeout and retry policy. A per-call override
+   * gets its own instance, so concurrent calls never share mutable state.
    */
-  private createApi(timeoutMs: number): GlitchTipApi {
+  private createApi(timeoutMs: number, noRetry = false): GlitchTipApi {
     const api = createClient<paths>({
       baseUrl: this.instance.url,
-      fetch: (request) => this.send(request, timeoutMs),
+      fetch: (request) => this.send(request, timeoutMs, noRetry),
       headers: this.defaultHeaders(),
       redirect: 'manual',
     });
@@ -216,9 +238,9 @@ export class GlitchTipClient {
     return timeoutMs;
   }
 
-  /** The fetch every call uses: timeout per attempt, retries for safe methods. */
-  private async send(request: Request, timeoutMs: number): Promise<Response> {
-    const retryable = RETRYABLE_METHODS.has(request.method);
+  /** The fetch every call uses: timeout per attempt, retries for safe methods unless `noRetry`. */
+  private async send(request: Request, timeoutMs: number, noRetry = false): Promise<Response> {
+    const retryable = !noRetry && RETRYABLE_METHODS.has(request.method);
     for (let attempt = 0; ; attempt++) {
       const canRetry = retryable && attempt < MAX_RETRIES;
       let response: Response;

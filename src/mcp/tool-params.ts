@@ -40,14 +40,16 @@ export const cursorParam = z
  * Free-form input a tool puts into a URL path (a release version, a name):
  * exactly one path segment. Refuses `.`, `..` and all-dot values, which URL
  * normalisation would collapse into another route; `/`, `\`, `%`; C0/C1
- * controls and DEL; and the zero-width, bidi-override and line/paragraph
- * separator characters `neutralise` also strips (BUG-20260925-016), so a
- * segment can't hide or reorder itself in a transcript. Slug inputs keep the
- * slug regex, which already excludes all of these. Every toolset refuses
- * such values the same way.
+ * controls and DEL; and the zero-width, bidi-override, format (`\p{Cf}`,
+ * soft hyphen included) and line/paragraph separator characters `neutralise`
+ * also strips (BUG-20260925-016, BUG-20260925-018), so a segment can't hide
+ * or reorder itself in a transcript. Slug inputs keep the slug regex, which
+ * already excludes all of these. Every toolset refuses such values the same
+ * way.
  */
 const PATH_SEGMENT_REJECT = new RegExp(
   `[/\\\\%\u0000-\u001f${HIGH_INVISIBLE_AND_BIDI_CLASS}${LINE_PARAGRAPH_CLASS}]`,
+  'u',
 );
 
 export function pathSegmentParam(label: string, maxLength: number) {

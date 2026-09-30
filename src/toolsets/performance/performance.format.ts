@@ -1,5 +1,6 @@
 import { flatten } from '../../format/sanitize';
 import { type Cell, keyValues, table, withCursor } from '../../format/table';
+import { isoTimestamp } from '../../format/time';
 import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
 import type { components } from '../../glitchtip/generated/schema';
@@ -53,10 +54,9 @@ function num(value: unknown): number | '?' | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : '?';
 }
 
-const STRICT_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 function iso(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
-  return typeof value === 'string' && STRICT_ISO.test(value) ? value : '?';
+  return typeof value === 'string' ? (isoTimestamp(value) ?? '?') : '?';
 }
 
 export function transactionGroupListView(page: Page<TransactionGroup>, org: string): View {

@@ -18,7 +18,11 @@ function groupIdOf(text: string): string | undefined {
  * `GET .../events/{eventId}/` every 2s until it is visible or `waitSeconds`
  * runs out — each attempt's own timeout is the time left in that budget
  * (floored at the client's 100 ms minimum), so a slow poll cannot itself run
- * past `wait_seconds`. Every branch here appends to an already-successful
+ * past `wait_seconds`. `noRetry` is set too (BUG-20260925-018 item 7):
+ * `timeoutMs` alone bounds one fetch attempt, not a hidden 429/5xx retry and
+ * its `Retry-After` sleep between attempts, which could otherwise carry one
+ * poll well past `wait_seconds` on its own (PR #43 review: up to ~20 s).
+ * Every branch here appends to an already-successful
  * send — none of them turns it into `isError` (a 401 or 403 here means the
  * server's own token was rejected or lacks permission to read events, not
  * that the DSN key failed).
@@ -40,7 +44,7 @@ export async function verifyEventVisible(
         VERIFY_OPERATION,
         'GET',
         `/api/0/projects/${org}/${project}/events/${eventId}/`,
-        { timeoutMs },
+        { timeoutMs, noRetry: true },
       );
     } catch {
       // A per-attempt timeout or transport failure on the poll is not a
