@@ -81,9 +81,10 @@ No GlitchTip contract is involved. Any string field GlitchTip returns can carry 
 1. **Redaction was designed for the error path only.** Confidence: high.
    - Evidence: section 7. Every foundation `redact()` call sits on a failure branch, and `ToolOutput` has no connection handle.
    - How to verify: add a protocol test with the token in an issue title and in an event message, for `text` and `json`. It fails on `develop`.
-2. **[Hypothesis] Some views pre-shorten strings (flatten/cap) before `render`.** If so, a scrub inside `ToolOutput` may meet only a prefix of the token.
-   - Evidence: BUG-017 found this shape on the error path.
-   - How to verify: grep the views for caps, and probe with the token straddling a cap.
+2. **[Confirmed 2026-09-30, PR #47 review] Views pre-shorten strings before `render`,** so a scrub inside `ToolOutput` meets only a prefix of the token.
+   - Evidence: `src/toolsets/events/event.parser.ts:34-38` truncates exception value (1000), message (2000) and breadcrumb (300); `event.render.ts:15` caps context lines (160); `event.render.ts:73` cuts at the renderer budget.
+   - Probe: token `tok_SECRET_1234567890abcdef` in an exception value at offset 975. `get_latest_event` returned it in full; a scrub applied after rendering left `tok_SECRET_1234567890abc` (24 of 27 characters).
+   - Consequence for the fix: redact the **response** before any view touches it (over the parsed JSON values), not the rendered text.
 
 ## 11. Severity Assessment
 
