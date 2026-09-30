@@ -118,6 +118,17 @@ documented in [`docs/tools/prompts.md`](docs/tools/prompts.md): `triage-issue`
 and `release-health-report`. Each is listed only when every toolset its steps
 use is enabled and available.
 
+## Resources
+
+Two MCP resource templates let a client attach GlitchTip data to a
+conversation by URI, without a tool call, documented in
+[`docs/tools/resources.md`](docs/tools/resources.md):
+`glitchtip://issues/{issue_id}{?organization}` (with the `issues` toolset) and
+`glitchtip://issues/{issue_id}/events/{event_id}{?organization}`, where
+`event_id` is an event id or `latest` (with the `events` toolset). Each body is
+the text the matching tool returns. `resources/list` is empty: there are no
+static resources.
+
 ## Development
 
 ```sh
