@@ -5,7 +5,7 @@ tracking_id: "BUG-20260930-021-token-in-tool-content"
 status: "patched"
 source_bug_report: "docs/bug-reports/2026-09-30-token-in-tool-content.md"
 created_at: "2026-09-30"
-pr_url: ""
+pr_url: "https://github.com/AndreyBegma/smart-glitchtip-mcp/pull/50"
 ---
 
 # Fix Summary: API token echoed in GlitchTip success content
@@ -161,7 +161,7 @@ None against a real instance: no credential for one here. The e2e check in the b
 
 ## 15. PR
 
-Filled in when opened.
+https://github.com/AndreyBegma/smart-glitchtip-mcp/pull/50
 
 ## 16. Verifier Instructions
 
