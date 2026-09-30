@@ -54,6 +54,7 @@ file. `src/config/**` is written by FEAT-014 in wave 1 and FEAT-015 in wave 3 on
 | FEAT-20260925-012 | `admin` (users/me, emails read, notifications, license, social apps) | BUG-006 | [FEAT-20260925-012-admin-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-012-admin-toolset.md) | token-safety, registration | 3 | MERGED |
 | FEAT-20260925-013 | `billing` + `ingest` (+ instance settings) | BUG-006 | [FEAT-20260925-013-billing-ingest-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-013-billing-ingest-toolset.md) | registration | 3 | MERGED |
 | FEAT-20260925-015 | `api_request` escape hatch (`api_get` + gated `api_request`) | BUG-006, FEAT-014 (src/config) | [FEAT-20260925-015-api-request-escape-hatch](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-015-api-request-escape-hatch.md) | ssrf, token-safety, registration | 3 | MERGED |
+| BUG-20260930-021 | API token echoed in GlitchTip success content reaches tool results unredacted (rule 1): one scrub at the output boundary, before the budget cut | FEAT-019 (src/mcp/resource-read.ts) | [bug report](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/bug-reports/2026-09-30-token-in-tool-content.md) | token-safety | after 019 | BLOCKED — work (FEAT-019) |
 
 ## Phase 3 — Resources and prompts
 
