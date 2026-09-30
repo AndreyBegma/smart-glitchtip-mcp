@@ -127,6 +127,47 @@ const LOG = {
   projectId: 1,
 };
 
+/** `flatten` in the alerts view cuts a field at 2000 characters; the token straddles it. */
+const ALERT_FIELD_LIMIT = 2000;
+
+const ALERT = {
+  id: 7,
+  name: `${'n'.repeat(ALERT_FIELD_LIMIT - 15)}${TOKEN}`,
+  timespanMinutes: 5,
+  quantity: 10,
+  uptime: false,
+  alertRecipients: [
+    {
+      id: 1,
+      recipientType: 'webhook',
+      // `maskUrl` lowercases the host, a form no whole-token match on rendered text finds.
+      url: `https://${TOKEN}.hooks.example.test/`,
+      config: null,
+      tagsToAdd: [TOKEN],
+    },
+    {
+      id: 2,
+      recipientType: 'zulip',
+      url: 'https://zulip.example.test',
+      config: {
+        bot_email: 'bot@zulip.example.test',
+        api_key: 'ZULIP_KEY_0123456789',
+        channel: `chan ${TOKEN}`,
+        topic: 'errors',
+      },
+      tagsToAdd: null,
+    },
+  ],
+};
+
+const ALERT_TEST_RESULTS = [
+  {
+    recipientType: 'webhook',
+    status: 'failed',
+    message: `401 from ${ALERT.alertRecipients[0].url} with ${TOKEN}`,
+  },
+];
+
 interface Case {
   readonly name: string;
   readonly tool: string;
@@ -146,6 +187,18 @@ const CASES: readonly Case[] = [
   },
   { name: 'release ref', tool: 'get_release', args: { version: '1.0.0' }, rendered: 'refs/' },
   { name: 'log line', tool: 'list_logs', args: {}, rendered: 'connection refused' },
+  {
+    name: 'alert name across the 2000-character cut, recipient host, tag, Zulip channel',
+    tool: 'get_project_alert',
+    args: { project: 'web', alert_id: 7 },
+    rendered: 'chan ',
+  },
+  {
+    name: 'alert test delivery message',
+    tool: 'test_project_alert',
+    args: { project: 'web', alert_id: 7 },
+    rendered: 'webhook',
+  },
 ];
 
 function mock(): MockGlitchTip {
@@ -154,17 +207,23 @@ function mock(): MockGlitchTip {
     .json('GET', `${API}/organizations/${ORG}/issues/`, [ISSUE])
     .json('GET', `${API}/organizations/${ORG}/issues/42/events/latest/`, EVENT)
     .json('GET', `${API}/organizations/${ORG}/releases/1.0.0/`, RELEASE)
-    .json('GET', `${API}/organizations/${ORG}/logs/`, [LOG]);
+    .json('GET', `${API}/organizations/${ORG}/logs/`, [LOG])
+    .json('GET', `${API}/projects/${ORG}/web/alerts/`, [ALERT])
+    .json('POST', `${API}/projects/${ORG}/web/alerts/7/test/`, ALERT_TEST_RESULTS);
 }
 
 const ENV = {
-  GLITCHTIP_TOOLSETS: 'issues,events,releases,logs',
+  GLITCHTIP_TOOLSETS: 'issues,events,releases,logs,alerts',
+  GLITCHTIP_READ_ONLY: 'false',
   GLITCHTIP_DEFAULT_ORG: ORG,
 };
 
 function assertClean(what: string, text: string): void {
   expect(text, `${what} carries the token`).not.toContain(TOKEN);
-  expect(text, `${what} carries a start of the token`).not.toContain(PREFIX);
+  // Case-folded too: a URL host comes back lowercased.
+  expect(text.toLowerCase(), `${what} carries a start of the token`).not.toContain(
+    PREFIX.toLowerCase(),
+  );
 }
 
 async function assertCaseClean(client: Client, { name, tool, args, rendered }: Case) {

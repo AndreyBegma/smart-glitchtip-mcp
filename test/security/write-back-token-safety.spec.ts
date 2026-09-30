@@ -3,7 +3,7 @@ import user from '../fixtures/admin/user.json';
 import { type Booted, bootInMemory, GLITCHTIP, resultText } from '../support/boot';
 import { MockGlitchTip } from '../support/mock-glitchtip';
 
-// BUG-20260930-021, AGENTS.md rule 15: the six read-then-write reads take the
+// BUG-20260930-021, AGENTS.md rule 15: the seven read-then-write reads take the
 // body unscrubbed (`writeBack`), so a token GlitchTip stores in a re-sent field
 // goes back as it was — never as `[redacted]` — while the tool result (from the
 // scrubbed write response) and any error still carry no start of the token.
@@ -104,11 +104,27 @@ const COMMITS = [
 
 const USER = { ...user, name: `Me ${TOKEN}` };
 
+const KEY_ID = '11111111-1111-4111-8111-111111111111';
+const KEY = {
+  id: KEY_ID,
+  name: `Key ${TOKEN}`,
+  label: `Key ${TOKEN}`,
+  dateCreated: '2026-01-02T03:04:05Z',
+  rateLimit: { window: 60, count: 100 },
+  dsn: {
+    public: 'https://public@glitchtip.test/1',
+    secret: 'https://secret@glitchtip.test/1',
+    security: 'https://glitchtip.test/api/1/security/',
+  },
+  public: 'abc',
+  projectID: 1,
+};
+
 type Body = Record<string, unknown>;
 
 const SITES: readonly Site[] = [
   {
-    name: 'readAlert (update_project_alert)',
+    name: 'readAlertToRewrite (update_project_alert)',
     toolset: 'alerts',
     tool: 'update_project_alert',
     args: { organization: 'acme', project: 'web', alert_id: 7, name: 'Renamed' },
@@ -117,6 +133,45 @@ const SITES: readonly Site[] = [
     writeMethod: 'PUT',
     writeUrl: `${API}/projects/acme/web/alerts/7/`,
     written: { ...ALERT, name: 'Renamed' },
+    resent: (body) => ((body as Body).alertRecipients as Body[])[0].url,
+    original: ALERT.alertRecipients[0].url,
+  },
+  {
+    name: 'readAlertToRewrite (add_alert_recipient)',
+    toolset: 'alerts',
+    tool: 'add_alert_recipient',
+    args: {
+      organization: 'acme',
+      project: 'web',
+      alert_id: 7,
+      recipient: { type: 'email' },
+    },
+    readUrl: `${API}/projects/acme/web/alerts/`,
+    read: [ALERT],
+    writeMethod: 'PUT',
+    writeUrl: `${API}/projects/acme/web/alerts/7/`,
+    written: ALERT,
+    resent: (body) => ((body as Body).alertRecipients as Body[])[0].url,
+    original: ALERT.alertRecipients[0].url,
+  },
+  {
+    name: 'readAlertToRewrite (remove_alert_recipient)',
+    toolset: 'alerts',
+    tool: 'remove_alert_recipient',
+    args: { organization: 'acme', project: 'web', alert_id: 7, recipient_id: 2, confirm: '2' },
+    readUrl: `${API}/projects/acme/web/alerts/`,
+    read: [
+      {
+        ...ALERT,
+        alertRecipients: [
+          ...ALERT.alertRecipients,
+          { id: 2, recipientType: 'email', url: '', config: null, tagsToAdd: null },
+        ],
+      },
+    ],
+    writeMethod: 'PUT',
+    writeUrl: `${API}/projects/acme/web/alerts/7/`,
+    written: ALERT,
     resent: (body) => ((body as Body).alertRecipients as Body[])[0].url,
     original: ALERT.alertRecipients[0].url,
   },
@@ -132,6 +187,19 @@ const SITES: readonly Site[] = [
     written: { ...PROJECT, platform: 'go' },
     resent: (body) => (body as Body).name,
     original: PROJECT.name,
+  },
+  {
+    name: 'update_project_key',
+    toolset: 'projects',
+    tool: 'update_project_key',
+    args: { organization: 'acme', project: 'web', key_id: KEY_ID, rate_limit: null },
+    readUrl: `${API}/projects/acme/web/keys/${KEY_ID}/`,
+    read: KEY,
+    writeMethod: 'PUT',
+    writeUrl: `${API}/projects/acme/web/keys/${KEY_ID}/`,
+    written: { ...KEY, rateLimit: null },
+    resent: (body) => (body as Body).name,
+    original: KEY.name,
   },
   {
     name: 'update_current_user',

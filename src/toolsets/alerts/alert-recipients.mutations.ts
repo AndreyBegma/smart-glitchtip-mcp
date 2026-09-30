@@ -27,7 +27,7 @@ import {
 import { recipientToWire, resendRecipients, storedScalars } from './alerts.payload';
 import { ALERT_WRITE_SCOPES } from './alerts.scopes';
 import { mergeSecrets, scrub, secretsFrom } from './alerts.secrets';
-import { readAlert, writeAlert } from './alerts.store';
+import { readAlert, readAlertToRewrite, writeAlert } from './alerts.store';
 
 // Registered only when GLITCHTIP_READ_ONLY=false (D-07). add and remove are
 // read-merge-writes of the whole alert (see alerts.store); test reads the
@@ -92,7 +92,7 @@ export class AlertRecipientsMutations {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
     const target = { org, project: args.project, alertId: args.alert_id };
-    const { alert, secrets } = await readAlert(glitchtip.client, target);
+    const { alert, secrets } = await readAlertToRewrite(glitchtip.client, target);
     const scalars = storedScalars(alert, args.alert_id);
     const kept = resendRecipients(alert, args.alert_id);
     const key = keyOfInput(args.recipient);
@@ -147,7 +147,7 @@ export class AlertRecipientsMutations {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
     const target = { org, project: args.project, alertId: args.alert_id };
-    const { alert, secrets } = await readAlert(glitchtip.client, target);
+    const { alert, secrets } = await readAlertToRewrite(glitchtip.client, target);
     const stored = recipientsOf(alert);
     const index = stored.findIndex((r) => r?.id === args.recipient_id);
     if (index < 0) return error(notARecipient(args.recipient_id, args.alert_id));

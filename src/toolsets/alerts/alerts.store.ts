@@ -1,4 +1,4 @@
-import type { GlitchTipClient } from '../../glitchtip/glitchtip.client';
+import type { CallOptions, GlitchTipClient } from '../../glitchtip/glitchtip.client';
 import { GlitchTipError } from '../../glitchtip/glitchtip.errors';
 import { alertCall, alertNotFoundMessage } from './alert-errors';
 import type { Alert } from './alerts.format';
@@ -28,14 +28,33 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 10;
 
 /**
- * Reads one alert. GlitchTip has no single-alert GET [Decided by spec
+ * Reads one alert, with the token scrubbed out of it, for a tool that renders
+ * it or reads it for ids. GlitchTip has no single-alert GET [Decided by spec
  * author], so this pages the project's list — 100 per page, at most 10
  * pages — and filters by id. Not found is a `not_found` tool error; so is
  * running out of pages, and the message says where it stopped.
  */
-export async function readAlert(
+export function readAlert(client: GlitchTipClient, target: AlertTarget): Promise<AlertSnapshot> {
+  return findAlert(client, target, {});
+}
+
+/**
+ * Reads one alert as GlitchTip stores it, for a read-merge-write whose
+ * `writeAlert` re-sends it whole: a scrubbed copy would write `[redacted]`
+ * back over a stored value (AGENTS.md rule 15, BUG-20260930-021). The alert
+ * is **never rendered**: the tool's result comes from `writeAlert`'s response.
+ */
+export function readAlertToRewrite(
   client: GlitchTipClient,
   target: AlertTarget,
+): Promise<AlertSnapshot> {
+  return findAlert(client, target, { writeBack: true });
+}
+
+async function findAlert(
+  client: GlitchTipClient,
+  target: AlertTarget,
+  options: CallOptions,
 ): Promise<AlertSnapshot> {
   const { org, project, alertId } = target;
   let cursor: string | undefined;
@@ -55,9 +74,7 @@ export async function readAlert(
             query: { limit: PAGE_SIZE, cursor },
           },
         }),
-      // Re-sent whole by writeAlert and read for the scrub list, never rendered: a
-      // scrubbed copy would write `[redacted]` back over a stored URL (BUG-20260930-021).
-      { writeBack: true },
+      options,
     );
     const alert = page.items.find((item) => item?.id === alertId);
     if (alert) return { alert, secrets: storedSecrets(alert) };

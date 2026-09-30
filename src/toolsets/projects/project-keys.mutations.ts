@@ -134,6 +134,8 @@ export class ProjectKeysMutations {
             path: { organization_slug: org, project_slug: args.project, key_id: args.key_id },
           },
         }),
+      // Re-sent by the PUT below, never rendered (BUG-20260930-021).
+      { writeBack: true },
     );
     // The PUT is full-replace: a field the read lacks, or carries with the wrong type,
     // refuses unless the caller gives it (AGENTS.md rule 15).

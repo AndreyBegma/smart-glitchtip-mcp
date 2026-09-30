@@ -34,20 +34,45 @@ function scrubArray(array: readonly unknown[], redactor: Redactor): unknown[] {
   return copy ?? (array as unknown[]);
 }
 
+/**
+ * The object with every key and value scrubbed, keys in their original order.
+ * Two keys that read alike once redacted (`a tok` and `a "tok"` escaped) both
+ * stay: the later one gets ` #2`, ` #3`… — a value a view can show is never
+ * dropped for a name clash the scrub itself caused.
+ */
 function scrubObject(object: Record<string, unknown>, redactor: Redactor): Record<string, unknown> {
+  const keys = Object.keys(object);
   let copy: Record<string, unknown> | undefined;
-  for (const key in object) {
-    if (!Object.hasOwn(object, key)) continue;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
     const entry = object[key];
     const nextKey = redactor.redact(key);
     const next = scrub(entry, redactor);
-    if (nextKey === key && next === entry) continue;
-    copy ??= { ...object };
-    // A redacted key replaces the original; two keys that redact alike keep the later value.
-    if (nextKey !== key) delete copy[key];
-    copy[nextKey] = next;
+    if (copy === undefined) {
+      if (nextKey === key && next === entry) continue;
+      copy = {};
+      for (let j = 0; j < i; j++) define(copy, keys[j], object[keys[j]]);
+    }
+    define(copy, freeKey(copy, nextKey), next);
   }
   return copy ?? object;
+}
+
+function freeKey(object: Record<string, unknown>, key: string): string {
+  if (!Object.hasOwn(object, key)) return key;
+  let n = 2;
+  while (Object.hasOwn(object, `${key} #${n}`)) n++;
+  return `${key} #${n}`;
+}
+
+/** An own data property, even for `__proto__`, which plain assignment would treat as the prototype. */
+function define(object: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(object, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

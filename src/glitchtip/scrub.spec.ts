@@ -51,6 +51,28 @@ describe('scrubSecrets', () => {
     expect(scrubbed.body).toBe('{"auth":"[redacted]"}');
   });
 
+  it('keeps the keys in their order when one is redacted', () => {
+    const scrubbed = scrubSecrets({ a: 1, [`k ${TOKEN}`]: 2, z: 3 }, redactor);
+    expect(Object.keys(scrubbed)).toEqual(['a', 'k [redacted]', 'z']);
+  });
+
+  it('keeps both values when two keys redact alike', () => {
+    const token = 'tok_"quoted"\\secret';
+    const escaped = JSON.stringify(token).slice(1, -1);
+    const response = { [`k ${token}`]: 1, [`k ${escaped}`]: 2, 'k [redacted]': 3 };
+    const scrubbed = scrubSecrets(response, new Redactor(token));
+    expect(scrubbed).toEqual({ 'k [redacted]': 1, 'k [redacted] #2': 2, 'k [redacted] #3': 3 });
+    expect(Object.keys(scrubbed)).toEqual(['k [redacted]', 'k [redacted] #2', 'k [redacted] #3']);
+  });
+
+  it('keeps an own __proto__ key as data, not as the copy’s prototype', () => {
+    const response = JSON.parse(`{"__proto__": {"polluted": true}, "t": "${TOKEN}"}`);
+    const scrubbed = scrubSecrets(response, redactor);
+    expect(Object.getPrototypeOf(scrubbed)).toBe(Object.prototype);
+    expect(Object.hasOwn(scrubbed, '__proto__')).toBe(true);
+    expect(scrubbed.t).toBe('[redacted]');
+  });
+
   it('passes undefined, numbers and non-plain objects through', () => {
     const date = new Date(0);
     expect(scrubSecrets(undefined, redactor)).toBeUndefined();
