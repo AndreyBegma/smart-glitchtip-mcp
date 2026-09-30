@@ -8,7 +8,7 @@ confidence: "high"
 created_at: "2026-09-30"
 glitchtip_version: "unknown (not version-dependent)"
 transport: "both"
-issue_url: ""
+issue_url: "https://github.com/AndreyBegma/smart-glitchtip-mcp/issues/48"
 ---
 
 # Bug Report: API token echoed in GlitchTip content reaches tool results unredacted
