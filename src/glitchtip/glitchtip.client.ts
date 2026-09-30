@@ -56,6 +56,12 @@ export interface CallOptions {
    */
   readonly extraSecrets?: readonly string[];
   /**
+   * Redacts `extraSecrets` of any length, not only 8+ characters. For a caller whose secrets
+   * are short by nature (an ntfy topic path); the default floor keeps a short common string
+   * from being scrubbed out of ordinary messages.
+   */
+  readonly keepShortExtraSecrets?: boolean;
+  /**
    * Skips the 429/5xx retry and its `Retry-After` sleep for this call (D-13's retry policy
    * still applies to every other call). For a caller that already bounds its own attempt
    * with `timeoutMs`, a hidden retry can still run well past that budget — `timeoutMs`
@@ -132,7 +138,7 @@ export class GlitchTipClient {
   ): Promise<Page<T>> {
     const result = await this.perform(operation, request, options);
     if (!Array.isArray(result.data)) throw malformedListError(operation);
-    const redactor = this.instance.redactor(options?.extraSecrets);
+    const redactor = this.redactorFor(options);
     const headers = redactedHeaders(result.response.headers, redactor);
     return { items: result.data, nextCursor: parseNextCursor(headers.get('link')), headers };
   }
@@ -159,7 +165,7 @@ export class GlitchTipClient {
     const url = rawRequestUrl(this.instance.url, operation, path, options.query);
     assertCallerHeaders(options.headers ?? {});
     const request = buildRawRequest(url, verb, this.defaultHeaders(), options);
-    const redactor = this.instance.redactor(options.extraSecrets);
+    const redactor = this.redactorFor(options);
     try {
       const response = await this.send(request, timeoutMs, options.noRetry ?? false);
       const text = redactor.redact(await response.text());
@@ -184,7 +190,7 @@ export class GlitchTipClient {
       timeoutMs === this.options.timeoutMs && !noRetry
         ? this.api
         : this.createApi(timeoutMs, noRetry);
-    const redactor = this.instance.redactor(options.extraSecrets);
+    const redactor = this.redactorFor(options);
     let result: ApiResult<T>;
     try {
       result = await request(api);
@@ -202,6 +208,10 @@ export class GlitchTipClient {
     );
     // The detail is redacted already; the message may also quote the operation.
     throw redacted(mapped, redactor);
+  }
+
+  private redactorFor(options: CallOptions | undefined): Redactor {
+    return this.instance.redactor(options?.extraSecrets, options?.keepShortExtraSecrets);
   }
 
   /**

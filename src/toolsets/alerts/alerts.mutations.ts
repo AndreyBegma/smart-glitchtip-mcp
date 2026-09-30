@@ -140,7 +140,7 @@ export class AlertsMutations {
               alertRecipients: args.recipients.map(recipientToWire),
             },
           }),
-        { extraSecrets: secrets },
+        { extraSecrets: secrets, keepShortExtraSecrets: true },
       ),
       {
         secrets,

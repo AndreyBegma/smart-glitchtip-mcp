@@ -94,7 +94,7 @@ export function writeAlert(
           },
           body: { ...scalars, alertRecipients: recipients },
         }),
-      { extraSecrets: secrets },
+      { extraSecrets: secrets, keepShortExtraSecrets: true },
     ),
     { secrets, notFound: alertNotFoundMessage(alertId, project) },
   );

@@ -45,8 +45,8 @@ export class ResolvedInstance {
    * What removes the token — and any secrets a caller holds besides it — from
    * text that may have come back from GlitchTip.
    */
-  redactor(extraSecrets: readonly string[] = []): Redactor {
-    return new Redactor(this.#token, extraSecrets);
+  redactor(extraSecrets: readonly string[] = [], keepShortExtras = false): Redactor {
+    return new Redactor(this.#token, extraSecrets, keepShortExtras);
   }
 
   toJSON(): object {

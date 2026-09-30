@@ -166,6 +166,7 @@ describe('applyJsonBudget', () => {
       expect(out).toMatchObject({ status: 'ok', nextCursor: 'c9', truncated: true });
       return elapsed;
     };
+    time(500); // warm-up: JIT-compile the budget code so time(n) is not flattered by running cold
     const n = time(3_000);
     const twoN = time(6_000);
     // A floor on the linear bound: a run so fast that measurement noise alone would exceed
@@ -174,26 +175,36 @@ describe('applyJsonBudget', () => {
     expect(twoN).toBeLessThan(2_000);
   });
 
-  it('budgets thousands of shrinkable siblings in under 200 ms (no per-step sort)', () => {
-    const wide = {
-      status: 'ok',
-      groups: Object.fromEntries(
-        Array.from({ length: 600 }, (_, i) => [`g${i}`, Array.from({ length: 300 }, () => i)]),
-      ),
+  it('budgets thousands of shrinkable siblings in linear time (no per-step sort)', () => {
+    // Arrays of 300 under many siblings: thousands of halving steps, each choosing among
+    // the siblings (a per-step sort took ~1 s on a shape like this). Scaling, not a wall
+    // clock, so parallel CI load cannot flake it (same reasoning as the test above).
+    const budgeted = (groups: number): { elapsed: number; kept: number } => {
+      const wide = {
+        status: 'ok',
+        groups: Object.fromEntries(
+          Array.from({ length: groups }, (_, i) => [`g${i}`, Array.from({ length: 300 }, () => i)]),
+        ),
+      };
+      const start = performance.now();
+      const out = applyJsonBudget(wide, 20_000) as {
+        status: string;
+        groups: Record<string, number[]>;
+      };
+      const elapsed = performance.now() - start;
+      expect(JSON.stringify(out, null, 2).length).toBeLessThanOrEqual(20_000);
+      expect(out.status).toBe('ok');
+      return { elapsed, kept: Object.keys(out.groups).length };
     };
-    // 600 arrays of 300: thousands of halving steps, each choosing among 600
-    // siblings (a per-step sort took ~1 s on a shape like this).
-    expect(JSON.stringify(wide).length).toBeGreaterThan(500_000);
-    const start = performance.now();
-    const out = applyJsonBudget(wide, 20_000) as {
-      status: string;
-      groups: Record<string, number[]>;
-    };
-    const elapsed = performance.now() - start;
-    expect(JSON.stringify(out, null, 2).length).toBeLessThanOrEqual(20_000);
-    expect(out.status).toBe('ok');
-    expect(Object.keys(out.groups)).toHaveLength(600);
-    expect(elapsed).toBeLessThan(200);
+    budgeted(100); // warm-up
+    const n = budgeted(600);
+    const twoN = budgeted(1_200);
+    expect(n.kept).toBe(600);
+    expect(twoN.kept).toBe(1_200);
+    expect(twoN.elapsed, `time(n)=${n.elapsed}ms, time(2n)=${twoN.elapsed}ms`).toBeLessThan(
+      Math.max(3 * n.elapsed, 50),
+    );
+    expect(twoN.elapsed).toBeLessThan(2_000);
   });
 
   it('overwrites a truncated or hint key of the value itself', () => {

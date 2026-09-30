@@ -27,9 +27,14 @@ of PRs #14, #30, #31, #36, #37, #43 and #44.
 | 4 | Alerts secrets | `writeAlert`, `create_project_alert` and the recipient delete pass the toolset's `secrets` as the client's `extraSecrets`, so redaction happens before the foundation's 500-character detail cut. The local scrub stays as the second net. |
 | 5 | Flaky perf test | The "6 MB in under 200 ms" assertion is replaced by a scaling one: `time(2n) < max(3 × time(n), 50 ms)` plus a 2 s ceiling. |
 | 6 | Invisible format characters | `HIGH_INVISIBLE_AND_BIDI_CLASS` gains `\p{Cf}` (soft hyphen U+00AD included); the regexes built from it carry the `u` flag, so `neutralise` and `pathSegmentParam` both cover it. |
+| 4b | Short alerts secrets | The client drops `extraSecrets` under 8 characters by default. Alerts keeps URL-derived forms of any length (an ntfy topic `/s3cr3t`), so it also passes the new `keepShortExtraSecrets: true`, which lifts the floor for that call. What the foundation covers: a secret of any length is redacted whole before the detail cut, and a cut-off start of 4+ characters (6+ for a URL) after it; a 1–3 character start of a short secret is not redacted, as it is too common to tell from ordinary text. The ntfy case is tested at every offset across the cut in `cut-redaction.spec.ts`. |
 | 7 | No-retry option | `CallOptions.noRetry` on `raw()` and `page()`/typed calls: no 429/5xx retry and no `Retry-After` sleep. `verifyEventVisible` sets it on every poll. |
 
 ## 3. Behaviour changes an agent can see
+
+- `\p{Cf}` (item 6) also removes tag characters U+E0020–E007F, Arabic number
+  signs U+0600–0605 and U+FFF9–FFFB. This is intended (ASCII-smuggling
+  defence), and `pathSegmentParam` refuses them.
 
 - An issue timestamp that is not strict ISO 8601 renders `?` instead of the raw
   string. Monitors and admin already fenced/gapped free text; the shared rule

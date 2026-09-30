@@ -201,7 +201,7 @@ export class AlertRecipientsMutations {
               query: { recipient_id: recipientId },
             },
           }),
-        { extraSecrets: secrets },
+        { extraSecrets: secrets, keepShortExtraSecrets: true },
       ),
       { secrets, notFound: alertNotFoundMessage(args.alert_id, args.project) },
     );

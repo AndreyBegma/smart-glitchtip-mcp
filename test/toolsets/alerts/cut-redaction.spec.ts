@@ -49,4 +49,21 @@ describe('alerts: extraSecrets covers the detail cut even with the local scrub d
     expect(leakedStart(text, WEBHOOK_URL)).toBeUndefined();
     expect(leakedStart(text, WEBHOOK_SECRET)).toBeUndefined();
   });
+
+  // A short URL-derived secret (an ntfy topic) is under the client's default 8-character
+  // floor; alerts lifts it with `keepShortExtraSecrets`. Every offset across the cut.
+  it('create_project_alert: a short ntfy topic path leaves no 4+ character prefix at any cut', async () => {
+    const topic = '/s3cr3t';
+    for (let offset = DETAIL_LIMIT - topic.length - 2; offset <= DETAIL_LIMIT + 1; offset++) {
+      const detail = `${'x'.repeat(offset)}${topic}${'y'.repeat(DETAIL_LIMIT)}`;
+      const mock = new MockGlitchTip().json('POST', ALERTS_URL, { detail }, { status: 422 });
+      const { text, isError } = await call(mock, 'create_project_alert', {
+        organization: 'acme',
+        project: 'web',
+        recipients: [{ type: 'ntfy', url: `https://ntfy.sh${topic}` }],
+      });
+      expect(isError).toBe(true);
+      expect(leakedStart(text, topic), `offset ${offset}`).toBeUndefined();
+    }
+  });
 });
