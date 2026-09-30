@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDateTime } from '../../../src/toolsets/performance/time-range';
+import { resolveDateTime } from './time-range';
 
-// Spec §Shared input rules: `start`/`end` accept an ISO 8601 date-time with a timezone, or
-// the relative forms `now` and `now-<n>m|h|d`, resolved to an ISO instant before any request
-// (acceptance 6). This toolset's own copy of the shared module — see time-range.ts's header
-// comment for why it is duplicated rather than imported from a sibling.
+// Spec FEAT-20260925-011 §Shared input rules: `start`/`end` accept an ISO 8601 date-time
+// with a timezone, or the relative forms `now` and `now-<n>m|h|d`, resolved to an ISO
+// instant before any request (acceptance 6). One suite for the module the performance,
+// logs and stats toolsets all import (BUG-20260925-018 item 2) — previously three
+// byte-identical copies, one per toolset.
 
 const FIXED_NOW = () => new Date('2026-06-15T12:00:00.000Z');
 

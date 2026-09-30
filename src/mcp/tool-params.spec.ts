@@ -22,6 +22,9 @@ describe('pathSegmentParam', () => {
     ['a line separator', 'a b', /bidi\/invisible characters/],
     ['a bidi override', 'a‮b', /bidi\/invisible characters/],
     ['a zero-width space', 'a​b', /bidi\/invisible characters/],
+    // BUG-20260925-018 acceptance 6: soft hyphen and the rest of \p{Cf}.
+    ['a soft hyphen', 'a­b', /bidi\/invisible characters/],
+    ['a \\p{Cf} sample (function application)', 'a⁡b', /bidi\/invisible characters/],
     ['too long', 'v'.repeat(65), /at most 64 characters/],
   ])('refuses %s', (_, value, message) => {
     const result = version.safeParse(value);

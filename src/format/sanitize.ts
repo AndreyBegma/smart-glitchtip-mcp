@@ -25,27 +25,32 @@ function char(code: number): string {
 
 // DEL and C1 controls (0x7F-0x9F), zero-width space/joiners/LRM/RLM
 // (0x200B-0x200F), bidi embeddings/overrides (0x202A-0x202E), word joiner
-// (0x2060), bidi isolates (0x2066-0x2069), BOM (0xFEFF). Above C0, everything
-// this module neutralises except the line/paragraph separators, which
-// `pathSegmentParam` (`../mcp/tool-params.ts`) also refuses outright.
+// (0x2060), bidi isolates (0x2066-0x2069), BOM (0xFEFF), and the rest of the
+// Unicode "format" category (`\p{Cf}`) — soft hyphen (U+00AD) among them
+// (BUG-20260925-018: `versionParam` accepted U+00AD, PR #44 review). Above
+// C0, everything this module neutralises except the line/paragraph
+// separators, which `pathSegmentParam` (`../mcp/tool-params.ts`) also
+// refuses outright. A regex built with this fragment needs the `u` flag:
+// `\p{...}` is only a property escape under it, a literal `p` otherwise.
 export const HIGH_INVISIBLE_AND_BIDI_CLASS =
   charRange(0x7f, 0x9f) +
   charRange(0x200b, 0x200f) +
   charRange(0x202a, 0x202e) +
   char(0x2060) +
   charRange(0x2066, 0x2069) +
-  char(0xfeff);
+  char(0xfeff) +
+  '\\p{Cf}';
 
 /** The line/paragraph separator characters, as a character-class body. */
 export const LINE_PARAGRAPH_CLASS = char(0x2028) + char(0x2029);
 
 const SPACE_RUN_KEEP_NEWLINES = new RegExp(
   `[${charRange(0x00, 0x09)}${charRange(0x0b, 0x1f)}${HIGH_INVISIBLE_AND_BIDI_CLASS}]+`,
-  'g',
+  'gu',
 );
 const SPACE_RUN_ALL = new RegExp(
   `[${charRange(0x00, 0x1f)}${HIGH_INVISIBLE_AND_BIDI_CLASS}]+`,
-  'g',
+  'gu',
 );
 const LINE_PARAGRAPH_SEPARATORS = new RegExp(`[${LINE_PARAGRAPH_CLASS}]+`, 'g');
 

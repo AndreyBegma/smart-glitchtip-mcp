@@ -244,6 +244,15 @@ describe('raw()', () => {
     const { client } = setup();
     expect((await failure(client.raw(OP, 'POST', '/api/0/nowhere/'))).kind).toBe('unreachable');
   });
+
+  // BUG-20260925-018 acceptance 7: `noRetry` skips the 429/5xx retry and its `Retry-After`
+  // sleep — `timeoutMs` alone bounds one attempt, not a retry sleep between attempts.
+  it('noRetry: true skips the retry on a GET 503, unlike the default policy', async () => {
+    const { mock, client } = setup();
+    mock.on('GET', `${API}/x/`, () => new Response('down', { status: 503 }));
+    expect((await client.raw(OP, 'GET', '/api/0/x/', { noRetry: true })).status).toBe(503);
+    expect(mock.requests).toHaveLength(1);
+  });
 });
 
 describe('per-call timeout', () => {

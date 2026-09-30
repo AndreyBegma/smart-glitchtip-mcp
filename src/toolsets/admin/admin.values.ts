@@ -1,4 +1,5 @@
 import { flatten } from '../../format/sanitize';
+import { isoTimestamp } from '../../format/time';
 import { type UntrustedSource, untrusted } from '../../format/untrusted';
 
 // Readers for GlitchTip values in the admin views. GlitchTip's answer is
@@ -55,14 +56,10 @@ export function yesNo(value: unknown): string {
   return b === undefined ? GAP : b ? 'yes' : 'no';
 }
 
-/** An ISO 8601 date-time as GlitchTip writes it: date, optional time, optional zone. */
-const ISO_DATE_TIME =
-  /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
-
 /**
- * The date part of an ISO date-time, or a gap. Anything else is not cut to
- * ten characters: a cut would happen before redaction and could leave the
- * start of a secret that no longer matches whole.
+ * The date part of a strict ISO 8601 date-time (`../../format/time`), or a gap. Anything else
+ * is not cut to ten characters: a cut would happen before redaction and could leave the start
+ * of a secret that no longer matches whole.
  */
 export function day(value: unknown): string {
   const iso = isoDateTime(value);
@@ -75,7 +72,7 @@ export function jsonDateTime(value: unknown): string | null {
 }
 
 function isoDateTime(value: unknown): string | undefined {
-  return typeof value === 'string' && ISO_DATE_TIME.test(value) ? value : undefined;
+  return typeof value === 'string' ? isoTimestamp(value) : undefined;
 }
 
 /** A fenced string (D-18); `absent` for null, a gap for any other non-string. */

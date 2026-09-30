@@ -1,4 +1,5 @@
 import { flatten } from './sanitize';
+import { untrusted } from './untrusted';
 
 export type Cell = string | number | boolean | null | undefined;
 
@@ -38,9 +39,19 @@ export function keyValues(entries: readonly (readonly [string, Cell])[]): string
     .join('\n');
 }
 
+/**
+ * A cursor shown bare, so it can be pasted back into the next call as it is: base64url
+ * characters plus the separators GlitchTip's own cursor uses. Anything else is fenced
+ * instead of printed raw (BUG-20260925-018 item 3), the same rule `api-view.ts` applies to
+ * the escape hatch's own cursor.
+ */
+const CURSOR_SHAPE = /^[A-Za-z0-9:._=+/-]{1,200}$/;
+
 /** Appends the cursor line a caller passes back to get the next page. */
 export function withCursor(body: string, nextCursor: string | undefined): string {
-  return nextCursor ? `${body}\nnext cursor: ${nextCursor}` : body;
+  if (!nextCursor) return body;
+  const cursor = CURSOR_SHAPE.test(nextCursor) ? nextCursor : untrusted('cursor', nextCursor);
+  return `${body}\nnext cursor: ${cursor}`;
 }
 
 function cellText(value: Cell, limit = CELL_LIMIT): string {

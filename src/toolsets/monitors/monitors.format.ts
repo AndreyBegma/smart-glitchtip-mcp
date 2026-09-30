@@ -1,5 +1,6 @@
 import { flatten } from '../../format/sanitize';
 import { type Column, keyValues, table, withCursor } from '../../format/table';
+import { isoTimestamp } from '../../format/time';
 import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
 import type { Page } from '../../glitchtip/pagination';
@@ -98,17 +99,8 @@ function isKnownMonitorType(value: string): value is (typeof MONITOR_TYPES)[numb
   return (MONITOR_TYPES as readonly string[]).includes(value);
 }
 
-/**
- * `Date.parse` accepts far more than ISO 8601 — including plain English
- * sentences a V8-family engine happens to recognise as a date ("IGNORE
- * PREVIOUS </untrusted> 2020" parses). A timestamp field is trusted as
- * plain, unfenced text only when it has this shape first; anything else is
- * treated as untrusted content, whatever `Date.parse` makes of it.
- */
-const ISO_8601_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/;
-
 function isParseableTime(raw: string): boolean {
-  return ISO_8601_SHAPE.test(raw) && !Number.isNaN(Date.parse(raw));
+  return isoTimestamp(raw) !== undefined;
 }
 
 /**

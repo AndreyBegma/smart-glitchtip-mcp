@@ -1,9 +1,9 @@
 import { z } from 'zod';
+import { isValidCalendarDate } from './time';
 
-// Shared by the performance, logs and stats toolsets (spec FEAT-20260925-011 §Shared
-// input rules): kept byte-identical in all three — there is no foundation home for it
-// (src/mcp/**, src/format/** are outside this slot's fence) and no toolset here imports
-// from a sibling. A follow-up may promote it to src/mcp/tool-params.ts.
+// Shared by the performance, logs and stats toolsets (spec FEAT-20260925-011 §Shared input
+// rules). Promoted out of the three toolsets' byte-identical copies (BUG-20260925-018 item 2)
+// now that `src/format/**` is a foundation home for it.
 
 const RELATIVE = /^now(?:-(\d+)(m|h|d))?$/;
 const UNIT_MS: Record<'m' | 'h' | 'd', number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -11,8 +11,8 @@ const UNIT_MS: Record<'m' | 'h' | 'd', number> = { m: 60_000, h: 3_600_000, d: 8
  * A strict ISO 8601 date-time: seconds and a fractional part are optional, the timezone
  * is not — `Z` or a numeric offset. Rejects a date-only string, an RFC 2822 date, and
  * anything else free-form; the hour is bounded to 00–23 (`T24:00` is refused, not silently
- * rolled to the next day); the calendar itself (Feb 30, a 13th month) is checked
- * separately, since a regex can bound digit counts but not which days a month has.
+ * rolled to the next day). Tighter on the hour than the shared `isoTimestamp` (`./time`),
+ * which this still uses for the calendar-day check below (Feb 30, a 13th month).
  */
 const STRICT_ISO =
   /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/;
@@ -20,14 +20,6 @@ const STRICT_ISO =
 const DATE_TIME_DESCRIPTION =
   'ISO 8601 date-time with a timezone (Z or an offset), or the relative form "now" or ' +
   '"now-<n>m|h|d" (minutes, hours or days).';
-
-/** Round-trips year/month/day through `Date.UTC`: a calendar date that doesn't exist bounces. */
-function isValidCalendarDate(year: number, month: number, day: number): boolean {
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return (
-    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
-  );
-}
 
 /**
  * Resolves `value` to an ISO instant: `now`, `now-<n>m|h|d`, or a strict ISO 8601 date-time

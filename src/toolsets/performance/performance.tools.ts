@@ -2,6 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { Ctx, Payload } from '@nestjs/microservices';
 import { type McpContext, Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
+import { checkTimeRange, dateTimeParam } from '../../format/time-range';
 import { ToolOutput } from '../../format/tool-output';
 import { type GlitchTipConnection, InstanceResolver } from '../../glitchtip/instance.resolver';
 import { cursorParam, formatParam, organizationParam, READ_ONLY } from '../../mcp/tool-params';
@@ -26,7 +27,6 @@ import {
   transactionGroupSortParam,
   UNTRUSTED_NOTE,
 } from './performance.params';
-import { checkTimeRange, dateTimeParam } from './time-range';
 import { callForTransactionGroup } from './transaction-group-not-found';
 
 /** Scopes GlitchTip accepts for every route in this toolset (`@has_permission`, v6.2.6). */

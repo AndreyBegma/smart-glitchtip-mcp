@@ -2,6 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { Ctx, Payload } from '@nestjs/microservices';
 import { type McpContext, Tool } from '@rekog/mcp-nest';
 import { z } from 'zod';
+import { checkTimeRange, dateTimeParam } from '../../format/time-range';
 import { ToolOutput } from '../../format/tool-output';
 import { GlitchTipError } from '../../glitchtip/glitchtip.errors';
 import { InstanceResolver } from '../../glitchtip/instance.resolver';
@@ -15,7 +16,6 @@ import {
   traceIdParam,
   UNTRUSTED_NOTE,
 } from './logs.params';
-import { checkTimeRange, dateTimeParam } from './time-range';
 
 /** Scopes GlitchTip accepts for every route in this toolset (`@has_permission`, v6.2.6). */
 export const LOGS_READ_SCOPES = ['event:read', 'event:write', 'event:admin'] as const;

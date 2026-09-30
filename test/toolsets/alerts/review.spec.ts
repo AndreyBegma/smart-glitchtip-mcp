@@ -57,7 +57,9 @@ describe('1 — a secret straddling the 500-character detail cut', () => {
       expect(isError).toBe(true);
       expect(text, `cut ${cutInside}`).not.toContain(LONG_TOKEN.slice(0, 4));
       expect(text, `cut ${cutInside}`).not.toContain('webhooks/99');
-      expect(text.endsWith(`${REDACTED}…`), `cut ${cutInside}`).toBe(true);
+      // The client now redacts the whole secret before the detail cut (BUG-20260925-018
+      // item 4), so the cut can fall inside the marker itself ("[redacte…"): harmless.
+      expect(text, `cut ${cutInside}`).toContain(REDACTED.slice(0, 5));
     }
   });
 

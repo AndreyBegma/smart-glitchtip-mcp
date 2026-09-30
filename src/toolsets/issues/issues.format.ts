@@ -1,4 +1,5 @@
 import { keyValues, table, withCursor } from '../../format/table';
+import { isoTimestamp } from '../../format/time';
 import type { View } from '../../format/tool-output';
 import { untrusted } from '../../format/untrusted';
 import type { components } from '../../glitchtip/generated/schema';
@@ -247,10 +248,12 @@ function truncate(text: string, limit: number): string {
   return capText(flatten(text), limit);
 }
 
-/** Relative age of an ISO timestamp, coarsest unit only (e.g. "2h ago"). */
+/**
+ * Relative age of an ISO timestamp, coarsest unit only (e.g. "2h ago"). Called only once
+ * `withRelative` has confirmed `iso` is a strict ISO 8601 date-time.
+ */
 function relativeTime(iso: string, now = Date.now()): string {
   const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
   const diffMs = now - then;
   const abs = Math.abs(diffMs);
   const suffix = diffMs >= 0 ? 'ago' : 'from now';
@@ -266,9 +269,17 @@ function relativeTime(iso: string, now = Date.now()): string {
   return 'just now';
 }
 
+/**
+ * Relative age plus the raw value, or `?` when `iso` isn't a strict ISO 8601 date-time
+ * (BUG-20260925-018 item 1): `Date.parse` alone accepts far more than that, including free
+ * text a V8-family engine happens to recognise as a date, and this renders the raw string
+ * unfenced once parsing succeeds.
+ */
 function withRelative(iso: string | null | undefined, now?: number): string {
   if (!iso) return '-';
-  return `${relativeTime(iso, now)} (${iso})`;
+  const valid = isoTimestamp(iso);
+  if (!valid) return '?';
+  return `${relativeTime(valid, now)} (${valid})`;
 }
 
 /** `team:<slug>`, or the kind and the fenced name: a name is whatever its owner typed. */
