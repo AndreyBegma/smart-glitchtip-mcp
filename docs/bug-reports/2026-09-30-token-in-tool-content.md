@@ -2,7 +2,7 @@
 title: "API token echoed in GlitchTip content reaches tool results unredacted"
 tracking_id: "BUG-20260930-021-token-in-tool-content"
 skill: "glitchtip-bug-report"
-status: "ready-for-fix"
+status: "fixed"
 severity: "high"
 confidence: "high"
 created_at: "2026-09-30"
