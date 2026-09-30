@@ -99,6 +99,23 @@ export async function notFoundAsInvalidParams<T>(
   }
 }
 
+/**
+ * A GlitchTip response with the connection's token removed from every string
+ * in it (AGENTS.md rule 1). GlitchTip content is written by whoever holds a
+ * DSN and can quote the token back (a title, an exception value); the client
+ * scrubs only error bodies. This runs on the response, **before** any view
+ * sees it: views cut fields (an exception value at 1 000 characters, a
+ * breadcrumb at 300) and budget their text, and a token cut in two there
+ * would survive as a prefix no whole-token match can find. The redactor
+ * matches the JSON-escaped forms too, and `[redacted]` needs no escaping, so
+ * the serialised response stays valid JSON.
+ */
+export function scrubResponse<T>(response: T, glitchtip: GlitchTipConnection): T {
+  const json = JSON.stringify(response);
+  if (json === undefined) return response;
+  return JSON.parse(glitchtip.instance.redactor().redact(json)) as T;
+}
+
 export interface ReadTextOptions {
   /** MCP_RESPONSE_BUDGET. */
   readonly budget: number;
@@ -109,13 +126,12 @@ export interface ReadTextOptions {
 }
 
 /**
- * The one text content item a read returns: `render()`'s text with the
- * connection's token removed, then bounded by MCP_RESPONSE_BUDGET (D-12) the
- * way ToolOutput bounds a tool's text, never cut inside an open fence.
- * GlitchTip content is written by whoever holds a DSN and can quote the token
- * back (a title, a message); the client scrubs only error bodies, so the
- * resource scrubs its own (AGENTS.md rule 1). A view that cannot read the
- * response is a `MalformedViewError` naming `operation`, as in
+ * The one text content item a read returns: `render()`'s text, bounded by
+ * MCP_RESPONSE_BUDGET (D-12) the way ToolOutput bounds a tool's text, never
+ * cut inside an open fence. `render` must read a response that went through
+ * `scrubResponse`; the whole-token scrub here is a second line for anything
+ * the resource adds itself, and runs before the cut. A view that cannot read
+ * the response is a `MalformedViewError` naming `operation`, as in
  * ToolOutput.render.
  */
 export function readText(

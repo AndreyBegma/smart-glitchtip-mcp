@@ -103,6 +103,18 @@ describe('token safety (acceptance 11)', () => {
     expect(booted?.logs()).not.toContain(TOKEN);
   });
 
+  it('a token straddling the title and culprit cap leaves no prefix, at every offset', async () => {
+    // Shifting the text by 0…15 characters puts the cap at every offset of a
+    // 15-character period (token plus space).
+    for (let shift = 0; shift <= TOKEN.length; shift++) {
+      const dense = `${'x'.repeat(shift)}${`${TOKEN} `.repeat(300)}`;
+      const text = await readIssue({ ...ISSUE, title: dense, culprit: dense });
+      await booted?.close();
+      booted = undefined;
+      expect(text, `shift ${shift}`).not.toContain(TOKEN.slice(0, 4));
+    }
+  });
+
   it('a token echoed in a 400 detail never reaches the error or the log', async () => {
     const mock = new MockGlitchTip().json(
       'GET',

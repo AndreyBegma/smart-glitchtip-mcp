@@ -14,6 +14,7 @@ import {
   resolveResourceOrganization,
   resourceIssueId,
   resourceOrganization,
+  scrubResponse,
 } from '../../mcp/resource-read';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
 import { callForIssue } from '../issues/issue-not-found';
@@ -72,10 +73,12 @@ export class EventResources {
     const requestedOrg = resourceOrganization(payload.organization);
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await resolveResourceOrganization(glitchtip, requestedOrg);
-    const detail =
+    const detail = scrubResponse(
       event === LATEST
         ? await this.latest(glitchtip, org, issueId, uri)
-        : await this.byId(glitchtip, org, issueId, event.id, uri);
+        : await this.byId(glitchtip, org, issueId, event.id, uri),
+      glitchtip,
+    );
     const operation =
       event === LATEST
         ? `get_latest_event (resource glitchtip://issues/${issueId}/events/latest)`

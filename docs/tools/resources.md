@@ -88,7 +88,9 @@ before the stack is touched.
 views: the issue title and culprit and every event section are fenced as
 `<untrusted …>`. Request headers are omitted (`Cookie` and `Authorization`
 never appear), and the user section is `id` and `email` only. The API token
-is scrubbed from the body even when GlitchTip quotes it back inside content.
+is scrubbed from GlitchTip's response before it is rendered, so it cannot
+survive even when GlitchTip quotes it back inside content and a field cap or
+the budget cut falls inside it.
 
 ## Errors
 

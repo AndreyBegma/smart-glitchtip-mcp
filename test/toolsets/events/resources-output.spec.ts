@@ -118,6 +118,57 @@ describe('token safety (acceptance 11)', () => {
   });
 });
 
+describe('token safety across cuts (acceptance 11)', () => {
+  const LONG_TOKEN = 'tok_SECRET_1234567890abcdef';
+  const PREFIX = LONG_TOKEN.slice(0, 4);
+
+  /** One exception entry, one chained value per string, each with an in-app frame. */
+  function exceptionEvent(...values: string[]) {
+    return buildEvent({
+      id: 'evt-cut',
+      title: 'RuntimeError',
+      entries: [
+        {
+          type: 'exception',
+          data: {
+            values: values.map((value) => ({
+              type: 'RuntimeError',
+              value,
+              stacktrace: {
+                frames: [{ filename: 'a.py', function: 'f', lineno: 1, in_app: true }],
+              },
+            })),
+          },
+        },
+      ],
+    });
+  }
+
+  it('a token straddling the 1 000-character exception value cut leaves no prefix', async () => {
+    const event = exceptionEvent(`${'v'.repeat(975)}${LONG_TOKEN} tail`);
+    const text = await readLatest(event, { GLITCHTIP_TOKEN: LONG_TOKEN });
+    expect(text).not.toContain(PREFIX);
+  });
+
+  it('a token straddling the budget cut leaves no prefix, wherever the cut falls', async () => {
+    // The stack section alone is over every budget below, so the cut lands in
+    // token-dense text; a step of 3 over 29 budgets meets every offset of a
+    // 28-character period (token plus space).
+    const dense = `${LONG_TOKEN} `.repeat(35);
+    const event = exceptionEvent(dense, dense, dense);
+    for (let budget = 1_000; budget <= 1_084; budget += 3) {
+      const text = await readLatest(event, {
+        GLITCHTIP_TOKEN: LONG_TOKEN,
+        MCP_RESPONSE_BUDGET: String(budget),
+      });
+      await booted?.close();
+      booted = undefined;
+      expect(text.length).toBeLessThanOrEqual(budget);
+      expect(text, `budget ${budget}`).not.toContain(PREFIX);
+    }
+  });
+});
+
 describe('redaction (acceptance 9, D-20)', () => {
   it('never shows the user IP or geo, nor Cookie or Authorization values', async () => {
     const event = buildEvent({
