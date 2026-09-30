@@ -213,10 +213,14 @@ export class ReleasesMutations {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
     const current = await callForRelease(
-      glitchtip.client.call({ name: 'get release', scopes: RELEASE_SCOPES, org }, (api) =>
-        api.GET('/api/0/organizations/{organization_slug}/releases/{version}/', {
-          params: { path: { organization_slug: org, version: args.version } },
-        }),
+      glitchtip.client.call(
+        { name: 'get release', scopes: RELEASE_SCOPES, org },
+        (api) =>
+          api.GET('/api/0/organizations/{organization_slug}/releases/{version}/', {
+            params: { path: { organization_slug: org, version: args.version } },
+          }),
+        // Re-sent by the PUT below, never rendered (BUG-20260930-021).
+        { writeBack: true },
       ),
       org,
       args.version,
@@ -358,10 +362,14 @@ export class ReleasesMutations {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
     const existing = await callForRelease(
-      glitchtip.client.call({ name: 'list commits', scopes: DEPLOY_COMMIT_SCOPES, org }, (api) =>
-        api.GET('/api/0/organizations/{organization_slug}/releases/{version}/commits/', {
-          params: { path: { organization_slug: org, version: args.version } },
-        }),
+      glitchtip.client.call(
+        { name: 'list commits', scopes: DEPLOY_COMMIT_SCOPES, org },
+        (api) =>
+          api.GET('/api/0/organizations/{organization_slug}/releases/{version}/commits/', {
+            params: { path: { organization_slug: org, version: args.version } },
+          }),
+        // Re-sent whole by the POST below, never rendered (BUG-20260930-021).
+        { writeBack: true },
       ),
       org,
       args.version,

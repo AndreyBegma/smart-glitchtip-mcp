@@ -46,7 +46,9 @@ path, independently of whether `user.geo` itself would also match.
 
 **The log body is never redacted — free text cannot be.** Anything an application logs
 (tokens, emails, IPs, session ids) in the body reaches the agent through `list_logs` and
-`get_log` unfiltered. This toolset stays off by default in part because of this; treat
+`get_log` unfiltered. The one exception is this server's own GlitchTip API token, which
+the client removes from every GlitchTip response before any view reads it
+(BUG-20260930-021). This toolset stays off by default in part because of this; treat
 enabling it as exposing raw application output to whatever reads the tool result.
 
 ## `list_logs`

@@ -25,7 +25,7 @@ import {
 } from './alerts.payload';
 import { ALERT_ADMIN_SCOPES, ALERT_WRITE_SCOPES } from './alerts.scopes';
 import { secretsFrom } from './alerts.secrets';
-import { readAlert, writeAlert } from './alerts.store';
+import { readAlertToRewrite, writeAlert } from './alerts.store';
 
 // Registered only when GLITCHTIP_READ_ONLY=false (D-07); see toolset.registry.
 
@@ -175,7 +175,7 @@ export class AlertsMutations {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const org = await glitchtip.organization(args.organization);
     const target = { org, project: args.project, alertId: args.alert_id };
-    const { alert, secrets } = await readAlert(glitchtip.client, target);
+    const { alert, secrets } = await readAlertToRewrite(glitchtip.client, target);
     const scalars = mergeScalars(storedScalars(alert, args.alert_id), args);
     assertWholeTrigger(scalars);
     const recipients = resendRecipients(alert, args.alert_id);

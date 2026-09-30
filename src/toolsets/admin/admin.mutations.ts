@@ -108,11 +108,14 @@ export class AdminMutations {
   ): Promise<CallToolResult> {
     const glitchtip = this.instances.connect(ctx.getRawRequest());
     const stored = await callForUser(
-      glitchtip.client.call<unknown>(userOperation('read current user'), (api) =>
-        api.GET('/api/0/users/{user_id}/', { params: { path: { user_id: 'me' } } }),
+      glitchtip.client.call<unknown>(
+        userOperation('read current user'),
+        (api) => api.GET('/api/0/users/{user_id}/', { params: { path: { user_id: 'me' } } }),
+        // Re-sent by the PUT below, never rendered (BUG-20260930-021).
+        { writeBack: true },
       ),
     );
-    const body = userUpdateBody(stored, args);
+    const body = userUpdateBody(stored, args, glitchtip.instance.redactor());
     const updated = await callForUser(
       glitchtip.client.call<unknown>(userOperation('update current user'), (api) =>
         api.PUT('/api/0/users/{user_id}/', { params: { path: { user_id: 'me' } }, body }),

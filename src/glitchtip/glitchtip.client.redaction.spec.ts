@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MockGlitchTip } from '../../test/support/mock-glitchtip';
-import { type CallOptions, GlitchTipClient } from './glitchtip.client';
+import { type CallOptions, type GlitchTipApi, GlitchTipClient } from './glitchtip.client';
 import { GlitchTipError } from './glitchtip.errors';
 import { ResolvedInstance } from './instance.context';
 
@@ -172,5 +172,67 @@ describe('GlitchTipClient error detail redaction (BUG-20260925-017)', () => {
     });
     expect(response.text).toBe('hook=[redacted] token=[redacted]');
     expect(response.headers.get('x-hook')).toBe('[redacted]');
+  });
+});
+
+// BUG-20260930-021: a 2xx body is scrubbed of the token before the caller sees
+// it; `writeBack` returns it as read, for a read whose values are re-sent.
+describe('GlitchTipClient success body redaction (BUG-20260930-021)', () => {
+  const ORG = `${BASE}/api/0/organizations/acme/`;
+  const getOrg = (api: GlitchTipApi) =>
+    api.GET('/api/0/organizations/{organization_slug}/', {
+      params: { path: { organization_slug: 'acme' } },
+    });
+
+  it('removes the token from every string of a call body, keys included', async () => {
+    const { mock, client } = setup();
+    mock.json('GET', ORG, { name: `acme ${TOKEN}`, nested: [{ [TOKEN]: TOKEN }] });
+    const org = await client.call({ name: 'get organization', scopes: [] }, getOrg);
+    expect(org).toEqual({ name: 'acme [redacted]', nested: [{ '[redacted]': '[redacted]' }] });
+  });
+
+  it('removes the token from every item of a page', async () => {
+    const { mock, client } = setup();
+    mock.json('GET', ORGS, [
+      { slug: 'a', name: TOKEN },
+      { slug: 'b', name: 'clean' },
+    ]);
+    const page = await client.page({ name: 'list organizations', scopes: [] }, (api) =>
+      api.GET('/api/0/organizations/'),
+    );
+    expect(page.items).toEqual([
+      { slug: 'a', name: '[redacted]' },
+      { slug: 'b', name: 'clean' },
+    ]);
+  });
+
+  it('scrubs the token only: an extra secret in a success body is the caller’s to scrub', async () => {
+    const { mock, client } = setup();
+    mock.json('GET', ORG, { name: WEBHOOK });
+    const org = await client.call({ name: 'get organization', scopes: [] }, getOrg, {
+      extraSecrets: [WEBHOOK],
+    });
+    expect(org).toEqual({ name: WEBHOOK });
+  });
+
+  it('returns a writeBack body as read, token included', async () => {
+    const { mock, client } = setup();
+    mock.json('GET', ORG, { name: `acme ${TOKEN}` });
+    const org = await client.call({ name: 'get organization', scopes: [] }, getOrg, {
+      writeBack: true,
+    });
+    expect(org).toEqual({ name: `acme ${TOKEN}` });
+  });
+
+  it('still redacts the failure of a writeBack call', async () => {
+    const { mock, client } = setup();
+    mock.json('GET', ORG, { detail: `bad ${TOKEN}` }, { status: 400 });
+    const error = await client
+      .call({ name: 'get organization', scopes: [] }, getOrg, { writeBack: true })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GlitchTipError);
+    const { message, detail } = error as GlitchTipError;
+    expect(detail).toBe('bad [redacted]');
+    expect(`${message} ${detail}`).not.toContain(TOKEN.slice(0, SHORTEST_LEAK));
   });
 });
