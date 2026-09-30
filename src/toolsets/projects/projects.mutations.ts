@@ -204,6 +204,8 @@ export class ProjectsMutations {
         api.GET('/api/0/projects/{organization_slug}/{project_slug}/', {
           params: { path: { organization_slug: org, project_slug: args.project } },
         }),
+      // Re-sent by the PUT below, never rendered (BUG-20260930-021).
+      { writeBack: true },
     );
     // ProjectIn is full-replace: each field is the caller's value, else the one read back.
     const body = {

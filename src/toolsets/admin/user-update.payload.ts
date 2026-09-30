@@ -1,4 +1,5 @@
 import type { components } from '../../glitchtip/generated/schema';
+import type { Redactor } from '../../glitchtip/redactor';
 import { AdminRefusal } from './admin.calls';
 import { type Fields, isFields } from './admin.values';
 
@@ -34,15 +35,16 @@ const OPTION_KEYS: ReadonlySet<string> = new Set(OPTIONS.map(([key]) => key));
  * this call does not change is re-sent as read. A field it must re-send that
  * the read lacks, or holds with the wrong type, refuses the write instead of
  * sending a default over GlitchTip's value (AGENTS.md rule 15). `null` is
- * GlitchTip's own "unset" and is re-sent as null.
+ * GlitchTip's own "unset" and is re-sent as null. `stored` is the unscrubbed
+ * read (it is re-sent), so `redactor` scrubs what a refusal quotes from it.
  */
-export function userUpdateBody(stored: unknown, changes: UserChanges): UserIn {
+export function userUpdateBody(stored: unknown, changes: UserChanges, redactor: Redactor): UserIn {
   if (!isFields(stored)) refuse('the user');
   const name =
     changes.name !== undefined ? changes.name : (kept(stored, 'name', 'string') as string | null);
   if (!isFields(stored.options)) refuse('options');
   const unknown = Object.keys(stored.options).find((key) => !OPTION_KEYS.has(key));
-  if (unknown !== undefined) refuseUnknown(unknown);
+  if (unknown !== undefined) refuseUnknown(redactor.redact(unknown));
   const options: Record<string, unknown> = {};
   for (const [key, kind, input] of OPTIONS) {
     const change = input === undefined ? undefined : changes[input];

@@ -15,7 +15,6 @@ import {
   resolveResourceOrganization,
   resourceIssueId,
   resourceOrganization,
-  scrubResponse,
 } from './resource-read';
 
 const TOKEN = 'tok_UNIT_secret';
@@ -116,33 +115,6 @@ describe('notFoundAsInvalidParams', () => {
   it('lets every other failure through unchanged', async () => {
     const forbidden = new GlitchTipError('forbidden', 'no', 403);
     await expect(notFoundAsInvalidParams(Promise.reject(forbidden), 'u')).rejects.toBe(forbidden);
-  });
-});
-
-describe('scrubResponse', () => {
-  it('removes the token from every string, keeping the shape', () => {
-    const response = {
-      title: `a ${TOKEN} b`,
-      nested: [{ value: TOKEN }, 7, null],
-      [`key ${TOKEN}`]: true,
-    };
-    const scrubbed = scrubResponse(response, connection());
-    expect(JSON.stringify(scrubbed)).not.toContain(TOKEN);
-    expect(scrubbed.title).toBe('a [redacted] b');
-    expect(scrubbed.nested).toEqual([{ value: '[redacted]' }, 7, null]);
-  });
-
-  it('removes a token whose JSON form is escaped, and stays valid JSON', () => {
-    const token = 'tok_"quoted"\\secret';
-    const glitchtip = {
-      instance: { redactor: () => new Redactor(token) },
-    } as unknown as GlitchTipConnection;
-    const scrubbed = scrubResponse({ title: `x ${token} y` }, glitchtip);
-    expect(scrubbed.title).toBe('x [redacted] y');
-  });
-
-  it('passes a response with no JSON form through', () => {
-    expect(scrubResponse(undefined, connection())).toBeUndefined();
   });
 });
 

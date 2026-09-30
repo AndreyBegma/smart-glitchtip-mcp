@@ -55,6 +55,9 @@ export async function readAlert(
             query: { limit: PAGE_SIZE, cursor },
           },
         }),
+      // Re-sent whole by writeAlert and read for the scrub list, never rendered: a
+      // scrubbed copy would write `[redacted]` back over a stored URL (BUG-20260930-021).
+      { writeBack: true },
     );
     const alert = page.items.find((item) => item?.id === alertId);
     if (alert) return { alert, secrets: storedSecrets(alert) };

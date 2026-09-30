@@ -21,6 +21,7 @@ import {
   rawMethod,
   rawRequestUrl,
 } from './request-guards';
+import { scrubSecrets } from './scrub';
 
 export type FetchLike = (request: Request) => Promise<Response>;
 export type GlitchTipApi = Client<paths>;
@@ -69,6 +70,14 @@ export interface CallOptions {
    * ingest verification poll could overrun `wait_seconds` by the retry delay, up to ~20 s).
    */
   readonly noRetry?: boolean;
+  /**
+   * Returns a 2xx body without the token scrubbed out of it — for the read of a
+   * read-then-write only, whose values are **re-sent to GlitchTip, never rendered**.
+   * Scrubbed, a field holding the token would be written back as `[redacted]`,
+   * overwriting GlitchTip's value (AGENTS.md rule 15, BUG-20260930-021). A
+   * failure is redacted as on every call.
+   */
+  readonly writeBack?: boolean;
 }
 
 export interface RawRequestOptions extends CallOptions {
@@ -198,7 +207,14 @@ export class GlitchTipClient {
       throw this.asGlitchTipError(error, timeoutMs, redactor);
     }
     const { response } = result;
-    if (response.ok) return result;
+    // GlitchTip content is written by any DSN holder and can quote the token
+    // back (a title, an exception value): it is removed from the parsed body
+    // before any view cuts a field (BUG-20260930-021). Token only — extra
+    // secrets stay the caller's to scrub where it renders them.
+    if (response.ok) {
+      if (options.writeBack) return result;
+      return { ...result, data: scrubSecrets(result.data, this.instance.redactor()) };
+    }
     const mapped = errorFromResponse(
       response.status,
       result.error,

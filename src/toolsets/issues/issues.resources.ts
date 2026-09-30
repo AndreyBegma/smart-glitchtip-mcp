@@ -12,7 +12,6 @@ import {
   resolveResourceOrganization,
   resourceIssueId,
   resourceOrganization,
-  scrubResponse,
 } from '../../mcp/resource-read';
 import { GlitchTipTools } from '../../mcp/toolset.decorators';
 import { callForIssue } from './issue-not-found';
@@ -65,9 +64,8 @@ export class IssueResources {
       ),
       uri,
     );
-    const scrubbed = scrubResponse(issue, glitchtip);
     const latestEvent = this.latestEventLine(issueId, requestedOrg);
-    return readText(uri, () => issueDetailView(scrubbed).text() + latestEvent, {
+    return readText(uri, () => issueDetailView(issue).text() + latestEvent, {
       budget: this.config.responseBudget,
       operation: `get_issue (resource glitchtip://issues/${issueId})`,
       glitchtip,

@@ -303,6 +303,8 @@ export class MonitorsMutations {
           api.GET('/api/0/organizations/{organization_slug}/monitors/{monitor_id}/', {
             params: { path: { organization_slug: org, monitor_id: args.monitor_id } },
           }),
+        // Re-sent by the PUT below, never rendered (BUG-20260930-021).
+        { writeBack: true },
       ),
       org,
       args.monitor_id,
