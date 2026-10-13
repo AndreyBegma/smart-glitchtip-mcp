@@ -1,0 +1,10 @@
+[
+  {
+    "id": 11,
+    "name": "Broken",
+    "timespanMinutes": 5,
+    "quantity": 10,
+    "uptime": false,
+    "alertRecipients": "https://discord.com/api/webhooks/1/WEBHOOK_SECRET_TOKEN"
+  }
+]

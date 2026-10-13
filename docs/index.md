@@ -16,4 +16,5 @@ Read in this order:
 | `bug-reports/` | `glitchtip-bug-report` output, indexed in `bug-reports/index.md` |
 | `fixes/` | fix notes from `glitchtip-fixer`, indexed in `fixes/index.md` |
 | `verifications/` | `glitchtip-fix-verifier` output, indexed in `verifications/index.md` |
-| `reference/` | `glitchtip-openapi.json` — snapshot of the GlitchTip API schema |
+| `reference/` | `glitchtip-openapi.json` (API schema snapshot), `glitchtip-endpoints.md` (endpoint extract + facts from the GlitchTip source), `mcp-nest-2.0.7-notes.md` (verified framework facts — overrides the package README) |
+| `tools/` | one file per toolset: tools, inputs, annotations, scopes (written by each toolset PR) |

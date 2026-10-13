@@ -1,0 +1,82 @@
+# Runs on every pull request into develop or main, and on every push to
+# develop (D-15). Toolchain split mirrors D-09: bun installs, Node runs.
+when:
+  - event: pull_request
+    branch: [develop, main]
+  - event: push
+    branch: develop
+
+# The attribution step diffs against the PR's target branch, so the clone
+# must carry full history, not the default shallow one.
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      depth: 0
+
+steps:
+  install:
+    image: oven/bun:1.4.0
+    commands:
+      - bun install --frozen-lockfile
+
+  lint:
+    image: node:24-bookworm-slim
+    commands:
+      - npm run lint
+    depends_on:
+      - install
+
+  typecheck:
+    image: node:24-bookworm-slim
+    commands:
+      - npm run typecheck
+    depends_on:
+      - install
+
+  api-generated:
+    # bookworm, not bookworm-slim: this step needs git for the diff check.
+    image: node:24-bookworm
+    commands:
+      - npm run api:generate
+      - git diff --exit-code src/glitchtip/generated
+    depends_on:
+      - install
+
+  test:
+    image: node:24-bookworm-slim
+    commands:
+      - npm run test
+    depends_on:
+      - install
+
+  build:
+    image: node:24-bookworm-slim
+    commands:
+      - npm run build
+    depends_on:
+      - install
+
+  fence:
+    image: python:3
+    commands:
+      - python3 scripts/orchestrator/fence_test.py
+    depends_on:
+      - install
+
+  attribution:
+    # Pull requests only: rejects any commit carrying a Claude attribution
+    # trailer or session footer (AGENTS.md workflow rule).
+    image: alpine/git
+    when:
+      - event: pull_request
+    commands:
+      - git fetch --no-tags origin "$CI_COMMIT_TARGET_BRANCH"
+      - |
+        if git log --format=%B "FETCH_HEAD..$CI_COMMIT_SHA" \
+            | grep -Eq '^(Co-Authored-By: Claude|Claude-Session:)'; then
+          echo "a commit on this branch carries a Claude attribution trailer" >&2
+          exit 1
+        fi
+    depends_on:
+      - install

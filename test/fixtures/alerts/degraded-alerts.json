@@ -1,0 +1,23 @@
+[
+  {
+    "id": 9,
+    "name": "Partial",
+    "timespanMinutes": 5,
+    "quantity": null,
+    "uptime": false,
+    "alertRecipients": [
+      { "id": 41, "recipientType": "webhook" },
+      { "id": 42, "recipientType": "discord", "url": "http://[not a url" },
+      { "id": 43, "recipientType": "pager", "url": "https://pager.example.test/hook/abc" },
+      { "id": 44, "recipientType": "zulip", "url": "https://zulip.example.test", "config": null }
+    ]
+  },
+  {
+    "id": 10,
+    "name": "No recipients field",
+    "timespanMinutes": 1,
+    "quantity": 1,
+    "uptime": false,
+    "alertRecipients": null
+  }
+]

@@ -187,3 +187,157 @@ with changelog and version bump, then a `v*` tag on `main`.
 **Decision.** v1 ships tools only. Phase 3 adds resource templates
 (`glitchtip://issues/{id}`, `glitchtip://events/{id}`) and prompts
 (`triage-issue`, `release-health-report`).
+
+## D-18 — GlitchTip content is untrusted data
+
+**Decision.** Everything that arrives through an event — titles, messages,
+culprits, stack-frame source, breadcrumbs, tags, user reports — was submitted via
+a public DSN by anyone who has it. Tool output marks it as data, and every tool
+description that returns it says so. The server never interprets it as
+instructions and never follows URLs found in it.
+
+**Why.** Prompt injection through error payloads is the obvious attack on an agent
+reading an error tracker. GlitchTip's own MCP server carries the same warning.
+
+## D-19 — Pinned framework line
+
+**Decision.** NestJS **11** (CommonJS), TypeScript **5.9**, `@rekog/mcp-nest`
+2.0.7, `@modelcontextprotocol/{server,core,node,client}` 2.1.0, `hono` 4, zod 4,
+Express 5, vitest + `unplugin-swc` with legacy decorators and decorator metadata.
+All pinned exactly.
+
+**Why.** `@rekog/mcp-nest` ships CommonJS only. Nest 12 is ESM-only and works with
+it only through Node's `require(esm)`. The Nest 11 line was verified end to end
+in a probe; TypeScript 7 was not checked for `emitDecoratorMetadata`.
+
+**Rejected.** Nest 12 ESM — it works on Node 24, but it rests on an interop path
+nobody here has tested beyond a probe.
+
+**Accepted cost.** A later move to Nest 12 is a migration row of its own.
+
+## D-20 — Raw event JSON is redacted for PII (amends D-12)
+
+**Decision.** `get_event_json` returns the event payload minus `user.ip_address`,
+`user.geo`, cookie values and `Authorization`/`Cookie` request headers. D-12's
+"full raw event" otherwise stands.
+
+**Why.** Least PII by default; an agent debugging an error does not need a
+visitor's IP address or session cookie, and a tool result may be logged or
+shared by the client.
+
+**Accepted cost.** Those fields are unreachable through this server; `api_request`
+(phase 2) is the escape hatch if an operator truly needs them.
+
+## D-21 — The escape hatch is two tools, and a denylist bounds it (amends D-06)
+
+**Decision.** The `api_request` toolset registers `api_get` (read-only, always
+listed when the toolset is enabled) and `api_request` (POST/PUT/PATCH/DELETE,
+destructive, exact `confirm` of `"<METHOD> /api/0/<path>"`), the latter only
+when not read-only **and** `GLITCHTIP_API_REQUEST_ALLOW_WRITE=true`. Paths are
+relative to the resolved instance's `/api/0/`; a fixed denylist
+(FEAT-20260925-015) refuses secret-minting and account-takeover routes for every
+method. `api_request` is the one exception to AGENTS.md rule 5 ("destructive
+operations are their own tool"): it is explicit by its own flag, confirm and
+annotations.
+
+**Why.** One tool cannot be both read-only and destructive (D-06's own
+argument); a GET-only escape hatch still reaches side-effecting GETs.
+
+**Accepted cost.** The denylist needs upkeep as GlitchTip adds routes.
+
+## D-22 — Uploads read local files only below an operator-set root
+
+**Decision.** The `uploads` toolset reads files only below
+`GLITCHTIP_UPLOAD_ROOT` (realpath containment, symlinks judged by their target,
+no dot-segments below the root, regular files only, at most
+`GLITCHTIP_UPLOAD_MAX_BYTES`). Naming `uploads` explicitly with
+`MCP_TRANSPORT=http`, or in stdio without a root, fails startup; under
+`GLITCHTIP_TOOLSETS=all` it is left out with a warning.
+
+**Why.** An agent steered by untrusted event text (D-18) must not be able to
+ship arbitrary local files to the instance.
+
+## D-23 — Admin coverage is narrower than "all" (amends D-06)
+
+**Decision.** D-06's `admin` toolset does not wrap, and `api_request` denies:
+API-token management (session-auth only; secrets in responses), MFA recovery
+codes, the setup wizard, invitation acceptance, deletion of the user, e-mail
+address changes, and SSO app create/update. E-mail addresses and SSO apps are
+readable; SSO apps deletable through an explicit tool.
+
+**Why.** Each is either unusable with a bearer token or a credential-minting /
+account-takeover path reachable by prompt injection. A person does these in the
+GlitchTip UI.
+
+**Accepted cost.** "Full API coverage" has these named holes.
+
+## D-24 — Destructive tools: the target is required, the organization is not
+
+**Decision.** Every destructive tool requires its target (slug, id, version) and
+a `confirm` equal to it, checked before any request; `organization` stays
+optional with the D-11 default. The one exception is `delete_organization`,
+whose target *is* the organization, so there `organization` is required.
+
+**Why.** A wrong default organization makes the target lookup fail (404) or the
+server filter the ids out; it cannot redirect a confirmed target to a different
+object. Requiring `organization` everywhere doubles every destructive call for
+no protection the confirm does not already give.
+
+## D-25 — `set_owner` is on the api_request denylist (amends D-23)
+
+**Decision.** `POST organizations/*/members/*/set_owner` is denied in
+`api_request` for every method. Ownership transfer stays reachable only through
+the members toolset's explicit, confirmed `transfer_organization_ownership`.
+
+**Why.** The same takeover-by-prompt-injection argument as D-23, and an
+explicit tool already exists — the escape hatch must not be a back door around
+its confirm.
+
+## D-26 — Resource URIs nest events under their issue, and take the
+organization as a query (amends D-17).
+**Decision.** The resource templates are `glitchtip://issues/{issue_id}{?organization}`
+and `glitchtip://issues/{issue_id}/events/{event_id}{?organization}`, where
+`event_id` is an event id or the literal `latest`. D-17's
+`glitchtip://events/{id}` is not built. Each template is registered when
+its toolset (`issues`, `events`) is enabled; `resources/list` stays empty.
+**Why.** GlitchTip has no route that reads an event by id alone: every
+event detail route is under an issue or a project [Confirmed: snapshot
+paths]. The issue is the agent's natural handle (it is what `list_issues`
+and `list_issue_events` return). A query parameter keeps D-17's literal
+path, keeps one template per resource, and mirrors the tools' optional
+`organization` (D-11).
+**Rejected.** `glitchtip://events/{id}` — unresolvable without a search.
+`glitchtip://{org}/issues/{id}` — puts a slug where the URI authority is,
+doubles the template count, and makes an organization named `issues`
+ambiguous to a reader. A separate `…/events/latest` template — the matcher
+takes the first template that matches, so two templates over one shape
+would make routing depend on registration order. A project-scoped event
+template (`glitchtip://projects/{project}/events/{event_id}`) — a later row
+if asked for.
+**Accepted cost.** One resource has two URIs (with and without
+`?organization`); a client that caches by URI may hold both.
+
+## D-27 — Prompts instruct, they do not fetch; they are listed only with
+their toolsets.
+**Decision.** A prompt's `prompts/get` result is a fixed instruction text
+plus its validated arguments, rendered as JSON literals. It makes no
+GlitchTip call and embeds no GlitchTip content. A prompt is registered only
+when every toolset it names is enabled and available; read-only mode does
+not affect it, because its text names read-only tools only and tells the
+agent to change nothing.
+**Why.** A `prompts/get` result enters the conversation as a *user*
+message. DSN-submitted text placed there would carry the user's authority —
+the strongest injection position there is (D-18). Tool results are where the
+fences and the untrusted-data sentences already live. Not fetching also
+means no token use, no budget and no partial failure at `prompts/get`, which
+clients call just to preview a prompt. Listing only with the toolsets
+follows D-07: an entry the agent cannot act on is not offered.
+**Rejected.** Pre-fetched prompts (issue, latest event, tags embedded as
+text or embedded resources) — they would need fencing and a budget split
+across several sources inside a user message, would fail half-way on one
+403, and would freeze options (`include_context`, `path`) the agent can
+choose itself. Always-listed prompts that tell the agent to enable a
+toolset — the agent cannot enable one.
+**Accepted cost.** A run costs the agent five to eight tool calls, and a
+model may deviate from the steps. `release-health-report` is absent by
+default, because `releases` is default-off (D-06).

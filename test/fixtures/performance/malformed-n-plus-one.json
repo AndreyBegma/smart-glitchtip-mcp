@@ -1,0 +1,10 @@
+{
+  "transactionName": null,
+  "op": "db",
+  "description": "SELECT * FROM x WHERE id = ?",
+  "totalSpans": 100,
+  "transactionCount": 10,
+  "spansPerTxn": 10,
+  "avgDuration": 5,
+  "totalTime": 500
+}

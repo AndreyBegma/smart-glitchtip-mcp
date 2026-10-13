@@ -1,0 +1,30 @@
+{
+  "id": "1",
+  "options": {
+    "timezone": "Europe/Berlin",
+    "stacktraceOrder": 1,
+    "language": "en",
+    "clock24Hours": true,
+    "preferredTheme": "dark"
+  },
+  "username": "me@example.test",
+  "dateJoined": "2026-01-01T00:00:00Z",
+  "email": "me@example.test",
+  "hasPasswordAuth": true,
+  "identities": [
+    {
+      "email": "me@idp.example.test",
+      "username": null,
+      "id": 3,
+      "provider": "google",
+      "uid": "UID-SECRET-4242",
+      "lastLogin": "2026-02-01T00:00:00Z",
+      "dateJoined": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "lastLogin": "2026-02-01T00:00:00Z",
+  "isSuperuser": false,
+  "isActive": true,
+  "name": "Me Person",
+  "chatwootIdentifierHash": "CHATWOOT-HMAC-9f8e7d"
+}

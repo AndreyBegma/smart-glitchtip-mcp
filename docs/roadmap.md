@@ -23,34 +23,42 @@ is `NO SPEC` and is not dispatchable. Tracking IDs are allocated by
 
 | ID | Title | Depends on | Spec | Gate | State |
 |---|---|---|---|---|---|
-| — | Scaffold: Nest + mcp-nest, config, GlitchTipClient from the snapshot, InstanceResolver, HTTP auth, toolset registry + read-only, stdio + HTTP, shared formatters, test harness, reference toolset `organizations` | — | — | token-safety, registration, ssrf | NO SPEC |
+| FEAT-20260925-001 | Scaffold: Nest + mcp-nest, config, GlitchTipClient from the snapshot, InstanceResolver, HTTP auth, toolset registry + read-only, stdio + HTTP, shared formatters, test harness, reference toolset `organizations` | — | [FEAT-20260925-001-foundation](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-001-foundation.md) | token-safety, registration, ssrf | MERGED |
 
-## Phase 1 — Core toolsets (three slots)
-
-| ID | Title | Depends on | Spec | Gate | State |
-|---|---|---|---|---|---|
-| — | Toolset `issues` (list/search/get/update/bulk/delete, comments, tags, hashes, user reports) | phase 0 | — | registration | NO SPEC |
-| — | Toolset `events` (issue events, latest, project events, event JSON) | phase 0 | — | — | NO SPEC |
-| — | Toolset `projects` (projects, keys/DSN, environments, project teams) | phase 0 | — | registration | NO SPEC |
-| — | Infrastructure: Dockerfile, compose for dev, Woodpecker pipelines, npm + ghcr publish on tag | phase 0 | — | token-safety | NO SPEC |
-
-## Phase 2 — Remaining toolsets (waves of three)
+## Phase 1 — Core toolsets and infrastructure (four rows, fleet ceiling three: the fourth dispatches on the first merge)
 
 | ID | Title | Depends on | Spec | Gate | State |
 |---|---|---|---|---|---|
-| — | `teams` + `members` | phase 0 | — | registration | NO SPEC |
-| — | `releases` (deploys, commits, files) | phase 0 | — | registration | NO SPEC |
-| — | `alerts` | phase 0 | — | registration | NO SPEC |
-| — | `monitors` + `status_pages` | phase 0 | — | registration | NO SPEC |
-| — | `performance` (transaction groups, spans, n+1) + `logs` + `stats` | phase 0 | — | — | NO SPEC |
-| — | `admin` (API tokens, users, emails, license, social apps, notifications) | phase 0 | — | token-safety, registration | NO SPEC |
-| — | `billing` + `ingest` | phase 0 | — | registration | NO SPEC |
-| — | `uploads` (stdio only) | phase 0 | — | registration | NO SPEC |
-| — | `api_request` escape hatch | phase 0 | — | ssrf, registration | NO SPEC |
+| FEAT-20260925-002 | Toolset `issues` (list/search/get/update/bulk/delete, comments, tags, hashes, user reports) | phase 0 | [FEAT-20260925-002-issues-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-002-issues-toolset.md) | registration | MERGED |
+| FEAT-20260925-003 | Toolset `events` (issue events, latest, project events, event JSON) | phase 0 | [FEAT-20260925-003-events-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-003-events-toolset.md) | — | MERGED |
+| FEAT-20260925-004 | Toolset `projects` (projects, keys/DSN, environments, project teams) | phase 0 | [FEAT-20260925-004-projects-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-004-projects-toolset.md) | registration | MERGED |
+| FEAT-20260925-005 | Infrastructure: Dockerfile, compose for dev, Woodpecker pipelines, npm + ghcr publish on tag | phase 0 | [FEAT-20260925-005-infrastructure](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-005-infrastructure.md) | token-safety | MERGED |
+
+## Phase 2 — Remaining toolsets (waves of three; wave 0 first)
+
+Waves come from the adversarial spec review: a wave never has two slots writing one
+file. `src/config/**` is written by FEAT-014 in wave 1 and FEAT-015 in wave 3 only.
+
+| ID | Title | Depends on | Spec | Gate | Wave | State |
+|---|---|---|---|---|---|---|
+| BUG-20260925-006 | Foundation output fixes: valid JSON under budget, fence-aware cut, malformed → agent error, client.raw, path-segment guard, writeEnabled, test harness hardening | FEAT-001..003 | [BUG-20260925-006-foundation-json-budget](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/BUG-20260925-006-foundation-json-budget.md) | token-safety, registration | 0 | MERGED |
+| BUG-20260925-016 | Neutralise control/invisible characters in untrusted text; shared flatten; pathSegmentParam C1/bidi | BUG-006 | [BUG-20260925-016-untrusted-control-characters](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/BUG-20260925-016-untrusted-control-characters.md) | token-safety | any | MERGED |
+| BUG-20260925-017 | Partial reads overwrite GlitchTip data (projects, releases); token prefix leaks through the 500-char detail cut | BUG-006 | [BUG-20260925-017-partial-read-writes-and-truncated-token](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/BUG-20260925-017-partial-read-writes-and-truncated-token.md) | token-safety | any | MERGED |
+| BUG-20260925-018 | Foundation follow-ups: strict timestamps, shared time range, cursor line, alerts extraSecrets, flaky perf test | BUG-017, FEAT-011 | [BUG-20260925-018-foundation-follow-ups](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/BUG-20260925-018-foundation-follow-ups.md) | token-safety | after 011 | MERGED |
+| FEAT-20260925-007 | `teams` + `members` | BUG-006 | [FEAT-20260925-007-teams-members-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-007-teams-members-toolset.md) | registration | 1 | MERGED |
+| FEAT-20260925-008 | `releases` (deploys, commits, files, repositories) | BUG-006 | [FEAT-20260925-008-releases-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-008-releases-toolset.md) | registration | 1 | MERGED |
+| FEAT-20260925-014 | `uploads` (stdio only) | BUG-006 | [FEAT-20260925-014-uploads-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-014-uploads-toolset.md) | registration | 1 | MERGED |
+| FEAT-20260925-009 | `alerts` | BUG-006 | [FEAT-20260925-009-alerts-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-009-alerts-toolset.md) | token-safety, registration | 2 | MERGED |
+| FEAT-20260925-010 | `monitors` + `status_pages` | BUG-006 | [FEAT-20260925-010-monitors-status-pages-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-010-monitors-status-pages-toolset.md) | registration | 2 | MERGED |
+| FEAT-20260925-011 | `performance` + `logs` + `stats` | BUG-006 | [FEAT-20260925-011-performance-logs-stats-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-011-performance-logs-stats-toolset.md) | — | 2 | MERGED |
+| FEAT-20260925-012 | `admin` (users/me, emails read, notifications, license, social apps) | BUG-006 | [FEAT-20260925-012-admin-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-012-admin-toolset.md) | token-safety, registration | 3 | MERGED |
+| FEAT-20260925-013 | `billing` + `ingest` (+ instance settings) | BUG-006 | [FEAT-20260925-013-billing-ingest-toolset](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-013-billing-ingest-toolset.md) | registration | 3 | MERGED |
+| FEAT-20260925-015 | `api_request` escape hatch (`api_get` + gated `api_request`) | BUG-006, FEAT-014 (src/config) | [FEAT-20260925-015-api-request-escape-hatch](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-015-api-request-escape-hatch.md) | ssrf, token-safety, registration | 3 | MERGED |
+| BUG-20260930-021 | API token echoed in GlitchTip success content reaches tool results unredacted (rule 1): one scrub at the output boundary, before the budget cut | FEAT-019 (src/mcp/resource-read.ts) | [bug report](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/bug-reports/2026-09-30-token-in-tool-content.md) | token-safety | after 019 | MERGED |
 
 ## Phase 3 — Resources and prompts
 
-| ID | Title | Depends on | Spec | Gate | State |
-|---|---|---|---|---|---|
-| — | Resource templates `glitchtip://issues/{id}`, `glitchtip://events/{id}` | issues, events | — | — | NO SPEC |
-| — | Prompts `triage-issue`, `release-health-report` | issues, events, releases | — | — | NO SPEC |
+| ID | Title | Depends on | Spec | Gate | Wave | State |
+|---|---|---|---|---|---|---|
+| FEAT-20260925-019 | Resource templates `glitchtip://issues/{issue_id}` and `…/events/{event_id|latest}` | BUG-018 (src/toolsets/issues, src/format) | [FEAT-20260925-019-resources](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-019-resources.md) | token-safety, registration | after BUG-018 | MERGED |
+| FEAT-20260925-020 | Prompts `triage-issue`, `release-health-report` (instruct, never fetch) | — (issues, events, releases merged) | [FEAT-20260925-020-prompts](https://github.com/AndreyBegma/smart-glitchtip-mcp/blob/develop/docs/specs/FEAT-20260925-020-prompts.md) | registration | any | MERGED |

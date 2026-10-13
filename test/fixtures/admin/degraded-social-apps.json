@@ -1,0 +1,16 @@
+[
+  {
+    "serverUrl": null,
+    "brand": "generic",
+    "callbackUrl": null,
+    "loginUrl": 5,
+    "id": null,
+    "name": "Leaky SSO",
+    "provider": "openid_connect",
+    "clientID": "public-client",
+    "clientSecret": "CLIENT-SECRET-XYZ-0001",
+    "secret": "RAW-SECRET-ABC-0002",
+    "token": "TOKEN-FIELD-QQQ-0003"
+  },
+  7
+]

@@ -1,0 +1,45 @@
+[
+  {
+    "id": 7,
+    "name": "High error rate",
+    "timespanMinutes": 5,
+    "quantity": 10,
+    "uptime": false,
+    "alertRecipients": [
+      {
+        "id": 31,
+        "recipientType": "discord",
+        "url": "https://discord.com/api/webhooks/1/WEBHOOK_SECRET_TOKEN",
+        "config": null,
+        "tagsToAdd": ["environment", "release"]
+      },
+      {
+        "id": 32,
+        "recipientType": "zulip",
+        "url": "https://zulip.example.test",
+        "config": {
+          "bot_email": "alert-bot@zulip.example.test",
+          "api_key": "ZULIP_SECRET_KEY_0123456789",
+          "channel": "ops",
+          "topic": "errors"
+        },
+        "tagsToAdd": null
+      },
+      {
+        "id": 33,
+        "recipientType": "email",
+        "url": "",
+        "config": null,
+        "tagsToAdd": []
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "name": null,
+    "timespanMinutes": null,
+    "quantity": null,
+    "uptime": true,
+    "alertRecipients": []
+  }
+]

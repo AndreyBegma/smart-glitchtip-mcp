@@ -1,0 +1,8 @@
+{
+  "op": "db.query",
+  "description": null,
+  "count": 5,
+  "avgDuration": 12.3,
+  "p95Duration": 20.1,
+  "totalTime": 61.5
+}
