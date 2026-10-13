@@ -3,13 +3,15 @@
 # Kept separate from release.yml on purpose. Woodpecker refuses the whole
 # pipeline when a referenced secret is missing, so with the image step inside
 # release.yml an instance without ghcr credentials could not publish to npm
-# either (v0.1.0, 2026-10-13). This workflow runs only for tags whose message
-# carries no "[no-image]" marker, and needs the secrets ghcr_username and
-# ghcr_token (a classic PAT with write:packages) limited to the tag event.
+# either (v0.1.0, 2026-10-13). It is opt-in: it runs only when the tag
+# message contains "[image]" (git tag -a vX.Y.Z -m "… [image]"), because a
+# filtered workflow is never compiled and so never asks for its secrets. It
+# needs ghcr_username and ghcr_token (a classic PAT with write:packages),
+# limited to the tag event.
 when:
   - event: tag
     ref: refs/tags/v*
-    evaluate: 'CI_COMMIT_MESSAGE not contains "[no-image]"'
+    evaluate: 'CI_COMMIT_MESSAGE contains "[image]"'
 
 steps:
   image:
