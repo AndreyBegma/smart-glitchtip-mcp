@@ -2,6 +2,7 @@
 
 **Give your AI agents the whole of GlitchTip — triage, releases, alerts, uptime and more — over MCP.**
 
+[![npm](https://img.shields.io/npm/v/smart-glitchtip-mcp)](https://www.npmjs.com/package/smart-glitchtip-mcp)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Your agent can read a stack trace in your editor, but the error tracker stays a
@@ -41,19 +42,17 @@ from the web UI.
 
 ## Quick start
 
-> **Not on npm yet.** The release pipeline publishes `smart-glitchtip-mcp` to
-> npm and `ghcr.io/andreybegma/smart-glitchtip-mcp` on the first `v*` tag; until
-> then, run it from source.
-
-Requirements: Node.js 24 or later and [Bun](https://bun.sh) (for installing and
-building).
+Requirements: Node.js 24 or later. The server is published on npm as
+[`smart-glitchtip-mcp`](https://www.npmjs.com/package/smart-glitchtip-mcp), so
+`npx` runs it without a clone:
 
 ```sh
-git clone https://github.com/AndreyBegma/smart-glitchtip-mcp
-cd smart-glitchtip-mcp
-bun install
-bun run build
+npx -y smart-glitchtip-mcp
 ```
+
+Or install it globally with `npm i -g smart-glitchtip-mcp` and run
+`smart-glitchtip-mcp`. To build it from source instead, see
+[Development](#development).
 
 Create an API token in GlitchTip (**Profile → Auth Tokens**) with the scopes
 the toolsets you enable need — each file in [`docs/tools/`](docs/tools/) lists
@@ -67,8 +66,8 @@ Add the server to your MCP client configuration, for example:
 {
   "mcpServers": {
     "glitchtip": {
-      "command": "node",
-      "args": ["/path/to/smart-glitchtip-mcp/dist/main.js"],
+      "command": "npx",
+      "args": ["-y", "smart-glitchtip-mcp"],
       "env": {
         "GLITCHTIP_URL": "https://glitchtip.example.com",
         "GLITCHTIP_TOKEN": "<api token>"
@@ -84,7 +83,7 @@ With Claude Code:
 claude mcp add glitchtip \
   -e GLITCHTIP_URL=https://glitchtip.example.com \
   -e GLITCHTIP_TOKEN=<api token> \
-  -- node /path/to/smart-glitchtip-mcp/dist/main.js
+  -- npx -y smart-glitchtip-mcp
 ```
 
 stdout carries only MCP messages; logs go to stderr. Then ask the agent, for
@@ -97,7 +96,7 @@ and triage the top one".
 MCP_TRANSPORT=http \
 MCP_HTTP_PORT=8080 \
 GLITCHTIP_URL=https://glitchtip.example.com \
-node dist/main.js
+npx -y smart-glitchtip-mcp
 ```
 
 The MCP endpoint is `POST /mcp` (stateless Streamable HTTP; no session ids).
