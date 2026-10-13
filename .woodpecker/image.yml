@@ -1,0 +1,28 @@
+# Publishes ghcr.io/andreybegma/smart-glitchtip-mcp on a v* tag.
+#
+# Kept separate from release.yml on purpose. Woodpecker refuses the whole
+# pipeline when a referenced secret is missing, so with the image step inside
+# release.yml an instance without ghcr credentials could not publish to npm
+# either (v0.1.0, 2026-10-13). This workflow runs only for tags whose message
+# carries no "[no-image]" marker, and needs the secrets ghcr_username and
+# ghcr_token (a classic PAT with write:packages) limited to the tag event.
+when:
+  - event: tag
+    ref: refs/tags/v*
+    evaluate: 'CI_COMMIT_MESSAGE not contains "[no-image]"'
+
+steps:
+  image:
+    image: woodpeckerci/plugin-kaniko
+    settings:
+      registry: ghcr.io
+      repo: andreybegma/smart-glitchtip-mcp
+      username:
+        from_secret: ghcr_username
+      password:
+        from_secret: ghcr_token
+      tags:
+        - ${CI_COMMIT_TAG}
+        - latest
+      build_args:
+        - VERSION=${CI_COMMIT_TAG}
