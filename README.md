@@ -4,6 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/smart-glitchtip-mcp)](https://www.npmjs.com/package/smart-glitchtip-mcp)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/mkQARkBs4C)
 
 Your agent can read a stack trace in your editor, but the error tracker stays a
 browser tab away: it cannot list the issues behind a spike, open the latest
